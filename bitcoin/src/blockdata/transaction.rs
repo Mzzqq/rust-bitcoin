@@ -29,18 +29,15 @@ use crate::sighash::{EcdsaSighashType, TapSighashType};
 use crate::witness::Witness;
 use crate::{Amount, FeeRate, SignedAmount, VarInt};
 
-#[rustfmt::skip]                // Keep public re-exports separate.
-#[cfg(feature = "bitcoinconsensus")]
-#[doc(inline)]
-pub use crate::consensus::validation::TxVerifyError;
-
 hashes::hash_newtype! {
     /// A bitcoin transaction hash/transaction ID.
     ///
     /// For compatibility with the existing Bitcoin infrastructure and historical and current
     /// versions of the Bitcoin Core software itself, this and other [`sha256d::Hash`] types, are
     /// serialized in reverse byte order when converted to a hex string via [`std::fmt::Display`]
-    /// trait operations. See [`hashes::Hash::DISPLAY_BACKWARD`] for more details.
+    /// trait operations.
+    ///
+    /// See [`hashes::Hash::DISPLAY_BACKWARD`] for more details.
     pub struct Txid(sha256d::Hash);
 
     /// A bitcoin witness transaction ID.
@@ -118,9 +115,8 @@ impl OutPoint {
     /// # Examples
     ///
     /// ```rust
-    /// use bitcoin::consensus::params;
     /// use bitcoin::constants::genesis_block;
-    /// use bitcoin::Network;
+    /// use bitcoin::{params, Network};
     ///
     /// let block = genesis_block(&params::MAINNET);
     /// let tx = &block.txdata[0];
@@ -1846,6 +1842,7 @@ mod tests {
     fn transaction_verify() {
         use std::collections::HashMap;
 
+        use crate::consensus::validation::TxVerifyError;
         use crate::witness::Witness;
 
         // a random recent segwit transaction from blockchain using both old and segwit inputs
