@@ -25,19 +25,19 @@ extern crate std;
 
 #[cfg(feature = "serde")]
 #[macro_use]
-extern crate actual_serde as serde;
+extern crate serde;
 
 #[cfg(feature = "alloc")]
 pub mod locktime;
 pub mod opcodes;
 pub mod sequence;
 
-#[rustfmt::skip]                // Keep public re-exports separate.
+#[doc(inline)]
+pub use units::*;
+
 #[doc(inline)]
 #[cfg(feature = "alloc")]
-pub use self::{
-    locktime::{absolute, relative},
-};
+pub use self::locktime::{absolute, relative};
 #[doc(inline)]
 pub use self::sequence::Sequence;
 

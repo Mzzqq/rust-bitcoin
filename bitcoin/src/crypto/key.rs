@@ -19,7 +19,7 @@ use crate::crypto::ecdsa;
 use crate::internal_macros::impl_asref_push_bytes;
 use crate::network::NetworkKind;
 use crate::prelude::{DisplayHex, String, Vec};
-use crate::script::ScriptBuf;
+use crate::script::{self, ScriptBuf};
 use crate::taproot::{TapNodeHash, TapTweakHash};
 
 #[rustfmt::skip]                // Keep public re-exports separate.
@@ -286,7 +286,7 @@ impl CompressedPublicKey {
 
     /// Returns the script code used to spend a P2WPKH input.
     pub fn p2wpkh_script_code(&self) -> ScriptBuf {
-        ScriptBuf::p2wpkh_script_code(self.wpubkey_hash())
+        script::p2wpkh_script_code(self.wpubkey_hash())
     }
 
     /// Writes the public key into a writer.
@@ -694,7 +694,6 @@ pub type UntweakedPublicKey = XOnlyPublicKey;
 /// Tweaked BIP-340 X-coord-only public key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(crate = "actual_serde"))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct TweakedPublicKey(XOnlyPublicKey);
 
@@ -727,7 +726,6 @@ pub type UntweakedKeypair = Keypair;
 /// ```
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(crate = "actual_serde"))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct TweakedKeypair(Keypair);
 

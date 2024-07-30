@@ -18,7 +18,7 @@ use crate::Sequence;
 
 #[rustfmt::skip]                // Keep public re-exports separate.
 #[doc(inline)]
-pub use units::locktime::relative::{Height, Time, TimeOverflowError};
+pub use units::locktime::relative::*;
 
 /// A relative lock time value, representing either a block height or time (512 second intervals).
 ///
@@ -37,7 +37,6 @@ pub use units::locktime::relative::{Height, Time, TimeOverflowError};
 /// * [BIP 112 CHECKSEQUENCEVERIFY](https://github.com/bitcoin/bips/blob/master/bip-0112.mediawiki)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(crate = "actual_serde"))]
 pub enum LockTime {
     /// A block height lock time value.
     Blocks(Height),

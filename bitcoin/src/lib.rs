@@ -15,9 +15,6 @@
 //!
 //! * `base64` (dependency) - enables encoding of PSBTs and message signatures.
 //! * `bitcoinconsensus` (dependency) - enables validating scripts and transactions.
-//! * `bitcoinconsensus-std` - same as `bitcoinconsensus` but also enables `std` here and in the
-//!                            `bitcoinconsensus` crate. Additionally, enables returning
-//!                            `bitcoinconsensus::Error` from `std::error::Error::source()`.
 //! * `default` - enables `std` and `secp-recovery`.
 //! * `ordered` (dependency) - adds implementations of `ArbitraryOrd` to some structs.
 //! * `rand` (transitive dependency) - makes it more convenient to generate random values.
@@ -79,7 +76,7 @@ pub extern crate secp256k1;
 
 #[cfg(feature = "serde")]
 #[macro_use]
-extern crate actual_serde as serde;
+extern crate serde;
 
 mod internal_macros;
 #[cfg(feature = "serde")]
@@ -93,6 +90,8 @@ pub mod bip158;
 pub mod bip32;
 pub mod blockdata;
 pub mod consensus;
+#[cfg(feature = "bitcoinconsensus")]
+pub mod consensus_validation;
 // Private until we either make this a crate or flatten it - still to be decided.
 pub(crate) mod crypto;
 pub mod hash_types;
