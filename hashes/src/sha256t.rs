@@ -96,6 +96,25 @@ where
         Self::from_engine(engine)
     }
 
+    /// Hashes the entire contents of the `reader`.
+    #[cfg(feature = "bitcoin-io")]
+    pub fn hash_reader<R: io::BufRead>(reader: &mut R) -> Result<Self, io::Error> {
+        let mut engine = Self::engine();
+        loop {
+            let bytes = reader.fill_buf()?;
+
+            let read = bytes.len();
+            // Empty slice means EOF.
+            if read == 0 {
+                break;
+            }
+
+            engine.input(bytes);
+            reader.consume(read);
+        }
+        Ok(Self::from_engine(engine))
+    }
+
     /// Returns the underlying byte array.
     pub const fn to_byte_array(self) -> [u8; 32] { self.0 }
 
@@ -209,11 +228,7 @@ macro_rules! sha256t_hash_newtype {
             /// Hashes some bytes.
             #[allow(unused)] // the user of macro may not need this
             pub fn hash(data: &[u8]) -> Self {
-                use $crate::HashEngine;
-
-                let mut engine = Self::engine();
-                engine.input(data);
-                Self::from_engine(engine)
+                <$hash_name as $crate::GeneralHash>::hash(data)
             }
 
             /// Hashes all the byte slices retrieved from the iterator together.
@@ -223,13 +238,14 @@ macro_rules! sha256t_hash_newtype {
                 B: AsRef<[u8]>,
                 I: IntoIterator<Item = B>,
             {
-                use $crate::HashEngine;
+                <$hash_name as $crate::GeneralHash>::hash_byte_chunks(byte_slices)
+            }
 
-                let mut engine = Self::engine();
-                for slice in byte_slices {
-                    engine.input(slice.as_ref());
-                }
-                Self::from_engine(engine)
+            /// Hashes the entire contents of the `reader`.
+            #[cfg(feature = "bitcoin-io")]
+            #[allow(unused)] // the user of macro may not need this
+            fn hash_reader<R: io::BufRead>(reader: &mut R) -> Result<Self, io::Error> {
+                <$hash_name as $crate::GeneralHash>::hash_reader(reader)
             }
         }
 

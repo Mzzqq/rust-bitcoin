@@ -5,6 +5,8 @@ use core::ops::{
     Bound, Index, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
 
+use internals::ToU64 as _;
+
 use super::witness_version::WitnessVersion;
 use super::{
     bytes_to_asm_fmt, Builder, Instruction, InstructionIndices, Instructions, PushBytes,
@@ -372,7 +374,7 @@ impl Script {
     ///
     /// [`minimal_non_dust_custom`]: Script::minimal_non_dust_custom
     pub fn minimal_non_dust(&self) -> crate::Amount {
-        self.minimal_non_dust_inner(DUST_RELAY_TX_FEE.into())
+        self.minimal_non_dust_internal(DUST_RELAY_TX_FEE.into())
     }
 
     /// Returns the minimum value an output with this script should have in order to be
@@ -387,10 +389,10 @@ impl Script {
     ///
     /// [`minimal_non_dust`]: Script::minimal_non_dust
     pub fn minimal_non_dust_custom(&self, dust_relay_fee: FeeRate) -> crate::Amount {
-        self.minimal_non_dust_inner(dust_relay_fee.to_sat_per_kwu() * 4)
+        self.minimal_non_dust_internal(dust_relay_fee.to_sat_per_kwu() * 4)
     }
 
-    fn minimal_non_dust_inner(&self, dust_relay_fee: u64) -> crate::Amount {
+    fn minimal_non_dust_internal(&self, dust_relay_fee: u64) -> crate::Amount {
         // This must never be lower than Bitcoin Core's GetDustThreshold() (as of v0.21) as it may
         // otherwise allow users to create transactions which likely can never be broadcast/confirmed.
         let sats = dust_relay_fee
@@ -399,11 +401,11 @@ impl Script {
             } else if self.is_witness_program() {
                 32 + 4 + 1 + (107 / 4) + 4 + // The spend cost copied from Core
                     8 + // The serialized size of the TxOut's amount field
-                    self.consensus_encode(&mut sink()).expect("sinks don't error") as u64 // The serialized size of this script_pubkey
+                    self.consensus_encode(&mut sink()).expect("sinks don't error").to_u64() // The serialized size of this script_pubkey
             } else {
                 32 + 4 + 1 + 107 + 4 + // The spend cost copied from Core
                     8 + // The serialized size of the TxOut's amount field
-                    self.consensus_encode(&mut sink()).expect("sinks don't error") as u64 // The serialized size of this script_pubkey
+                    self.consensus_encode(&mut sink()).expect("sinks don't error").to_u64() // The serialized size of this script_pubkey
             })
             .expect("dust_relay_fee or script length should not be absurdly large")
             / 1000; // divide by 1000 like in Core to get value as it cancels out DEFAULT_MIN_RELAY_TX_FEE

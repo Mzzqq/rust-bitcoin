@@ -80,6 +80,9 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate core;
 
+#[cfg(feature = "bitcoin-io")]
+extern crate bitcoin_io as io;
+
 #[cfg(feature = "serde")]
 /// A generic serialization/deserialization framework.
 pub extern crate serde;
@@ -177,7 +180,7 @@ pub type HkdfSha256 = Hkdf<sha256::Hash>;
 pub type HkdfSha512 = Hkdf<sha512::Hash>;
 
 /// A hashing engine which bytes can be serialized into.
-pub trait HashEngine: Clone + Default {
+pub trait HashEngine: Clone {
     /// Length of the hash's internal block size, in bytes.
     const BLOCK_SIZE: usize;
 
@@ -189,6 +192,9 @@ pub trait HashEngine: Clone + Default {
 }
 
 /// Trait describing hash digests which can be constructed by hashing arbitrary data.
+///
+/// Some methods have been bound to engines which implement Default, which is
+/// generally an unkeyed hash function.
 pub trait GeneralHash: Hash {
     /// A hashing engine which bytes can be serialized into. It is expected
     /// to implement the `io::Write` trait, and to never return errors under
@@ -196,13 +202,21 @@ pub trait GeneralHash: Hash {
     type Engine: HashEngine;
 
     /// Constructs a new engine.
-    fn engine() -> Self::Engine { Self::Engine::default() }
+    fn engine() -> Self::Engine
+    where
+        Self::Engine: Default,
+    {
+        Self::Engine::default()
+    }
 
     /// Produces a hash from the current state of a given engine.
     fn from_engine(e: Self::Engine) -> Self;
 
     /// Hashes some bytes.
-    fn hash(data: &[u8]) -> Self {
+    fn hash(data: &[u8]) -> Self
+    where
+        Self::Engine: Default,
+    {
         let mut engine = Self::engine();
         engine.input(data);
         Self::from_engine(engine)
@@ -213,12 +227,35 @@ pub trait GeneralHash: Hash {
     where
         B: AsRef<[u8]>,
         I: IntoIterator<Item = B>,
+        Self::Engine: Default,
     {
         let mut engine = Self::engine();
         for slice in byte_slices {
             engine.input(slice.as_ref());
         }
         Self::from_engine(engine)
+    }
+
+    /// Hashes the entire contents of the `reader`.
+    #[cfg(feature = "bitcoin-io")]
+    fn hash_reader<R: io::BufRead>(reader: &mut R) -> Result<Self, io::Error>
+    where
+        Self::Engine: Default,
+    {
+        let mut engine = Self::engine();
+        loop {
+            let bytes = reader.fill_buf()?;
+
+            let read = bytes.len();
+            // Empty slice means EOF.
+            if read == 0 {
+                break;
+            }
+
+            engine.input(bytes);
+            reader.consume(read);
+        }
+        Ok(Self::from_engine(engine))
     }
 }
 
@@ -286,7 +323,8 @@ impl std::error::Error for FromSliceError {}
 
 #[cfg(test)]
 mod tests {
-    use crate::sha256d;
+    use super::*;
+    use crate::{sha256, sha256d};
 
     hash_newtype! {
         /// A test newtype
@@ -310,5 +348,11 @@ mod tests {
         let hex = format!("{}", orig);
         let rinsed = hex.parse::<TestNewtype>().expect("failed to parse hex");
         assert_eq!(rinsed, orig)
+    }
+
+    #[test]
+    fn hash_reader() {
+        let mut reader: &[u8] = b"hello";
+        assert_eq!(sha256::Hash::hash_reader(&mut reader).unwrap(), sha256::Hash::hash(b"hello"),)
     }
 }
