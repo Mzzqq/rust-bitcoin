@@ -29,6 +29,9 @@ use crate::sighash::{EcdsaSighashType, TapSighashType};
 use crate::witness::Witness;
 use crate::{Amount, FeeRate, SignedAmount, VarInt};
 
+#[cfg(feature = "arbitrary")]
+use arbitrary::{Arbitrary, Unstructured};
+
 hashes::hash_newtype! {
     /// A bitcoin transaction hash/transaction ID.
     ///
@@ -349,53 +352,69 @@ impl TxOut {
     /// This is used as a "null txout" in consensus signing code.
     pub const NULL: Self =
         TxOut { value: Amount::from_sat(0xffffffffffffffff), script_pubkey: ScriptBuf::new() };
+}
 
-    /// The weight of this output.
-    ///
-    /// Keep in mind that when adding a [`TxOut`] to a [`Transaction`] the total weight of the
-    /// transaction might increase more than `TxOut::weight`. This happens when the new output added
-    /// causes the output length `VarInt` to increase its encoding length.
-    ///
-    /// # Panics
-    ///
-    /// If output size * 4 overflows, this should never happen under normal conditions. Use
-    /// `Weght::from_vb_checked(self.size().to_u64())` if you are concerned.
-    pub fn weight(&self) -> Weight {
-        // Size is equivalent to virtual size since all bytes of a TxOut are non-witness bytes.
-        Weight::from_vb(self.size().to_u64()).expect("should never happen under normal conditions")
+crate::internal_macros::define_extension_trait! {
+    /// Extension functionality for the [`TxOut`] type.
+    pub trait TxOutExt impl for TxOut {
+        /// The weight of this output.
+        ///
+        /// Keep in mind that when adding a [`TxOut`] to a [`Transaction`] the total weight of the
+        /// transaction might increase more than `TxOut::weight`. This happens when the new output added
+        /// causes the output length `VarInt` to increase its encoding length.
+        ///
+        /// # Panics
+        ///
+        /// If output size * 4 overflows, this should never happen under normal conditions. Use
+        /// `Weght::from_vb_checked(self.size().to_u64())` if you are concerned.
+        fn weight(&self) -> Weight {
+            // Size is equivalent to virtual size since all bytes of a TxOut are non-witness bytes.
+            Weight::from_vb(self.size().to_u64())
+                .expect("should never happen under normal conditions")
+        }
+
+        /// Returns the total number of bytes that this output contributes to a transaction.
+        ///
+        /// There is no difference between base size vs total size for outputs.
+        fn size(&self) -> usize { size_from_script_pubkey(&self.script_pubkey) }
+
+        /// Creates a `TxOut` with given script and the smallest possible `value` that is **not** dust
+        /// per current Core policy.
+        ///
+        /// Dust depends on the -dustrelayfee value of the Bitcoin Core node you are broadcasting to.
+        /// This function uses the default value of 0.00003 BTC/kB (3 sat/vByte).
+        ///
+        /// To use a custom value, use [`minimal_non_dust_custom`].
+        ///
+        /// [`minimal_non_dust_custom`]: TxOut::minimal_non_dust_custom
+        fn minimal_non_dust(script_pubkey: ScriptBuf) -> Self {
+            TxOut { value: script_pubkey.minimal_non_dust(), script_pubkey }
+        }
+
+        /// Creates a `TxOut` with given script and the smallest possible `value` that is **not** dust
+        /// per current Core policy.
+        ///
+        /// Dust depends on the -dustrelayfee value of the Bitcoin Core node you are broadcasting to.
+        /// This function lets you set the fee rate used in dust calculation.
+        ///
+        /// The current default value in Bitcoin Core (as of v26) is 3 sat/vByte.
+        ///
+        /// To use the default Bitcoin Core value, use [`minimal_non_dust`].
+        ///
+        /// [`minimal_non_dust`]: TxOut::minimal_non_dust
+        fn minimal_non_dust_custom(script_pubkey: ScriptBuf, dust_relay_fee: FeeRate) -> Self {
+            TxOut { value: script_pubkey.minimal_non_dust_custom(dust_relay_fee), script_pubkey }
+        }
     }
+}
 
-    /// Returns the total number of bytes that this output contributes to a transaction.
-    ///
-    /// There is no difference between base size vs total size for outputs.
-    pub fn size(&self) -> usize { size_from_script_pubkey(&self.script_pubkey) }
-
-    /// Creates a `TxOut` with given script and the smallest possible `value` that is **not** dust
-    /// per current Core policy.
-    ///
-    /// Dust depends on the -dustrelayfee value of the Bitcoin Core node you are broadcasting to.
-    /// This function uses the default value of 0.00003 BTC/kB (3 sat/vByte).
-    ///
-    /// To use a custom value, use [`minimal_non_dust_custom`].
-    ///
-    /// [`minimal_non_dust_custom`]: TxOut::minimal_non_dust_custom
-    pub fn minimal_non_dust(script_pubkey: ScriptBuf) -> Self {
-        TxOut { value: script_pubkey.minimal_non_dust(), script_pubkey }
-    }
-
-    /// Creates a `TxOut` with given script and the smallest possible `value` that is **not** dust
-    /// per current Core policy.
-    ///
-    /// Dust depends on the -dustrelayfee value of the Bitcoin Core node you are broadcasting to.
-    /// This function lets you set the fee rate used in dust calculation.
-    ///
-    /// The current default value in Bitcoin Core (as of v26) is 3 sat/vByte.
-    ///
-    /// To use the default Bitcoin Core value, use [`minimal_non_dust`].
-    ///
-    /// [`minimal_non_dust`]: TxOut::minimal_non_dust
-    pub fn minimal_non_dust_custom(script_pubkey: ScriptBuf, dust_relay_fee: FeeRate) -> Self {
-        TxOut { value: script_pubkey.minimal_non_dust_custom(dust_relay_fee), script_pubkey }
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for TxOut {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(TxOut {
+            value: Amount::arbitrary(u)?,
+            script_pubkey: ScriptBuf::arbitrary(u)?,
+        })
     }
 }
 
@@ -1419,8 +1438,6 @@ impl InputWeightPrediction {
 
 #[cfg(test)]
 mod tests {
-    use core::str::FromStr;
-
     use hex::{test_hex_unwrap as hex, FromHex};
     #[cfg(feature = "serde")]
     use internals::serde_round_trip;
@@ -1445,43 +1462,38 @@ mod tests {
 
     #[test]
     fn outpoint() {
-        assert_eq!(OutPoint::from_str("i don't care"), Err(ParseOutPointError::Format));
+        assert_eq!("i don't care".parse::<OutPoint>(), Err(ParseOutPointError::Format));
         assert_eq!(
-            OutPoint::from_str(
-                "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:1:1"
-            ),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:1:1"
+                .parse::<OutPoint>(),
             Err(ParseOutPointError::Format)
         );
         assert_eq!(
-            OutPoint::from_str("5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:"),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:".parse::<OutPoint>(),
             Err(ParseOutPointError::Format)
         );
         assert_eq!(
-            OutPoint::from_str(
-                "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:11111111111"
-            ),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:11111111111"
+                .parse::<OutPoint>(),
             Err(ParseOutPointError::TooLong)
         );
         assert_eq!(
-            OutPoint::from_str(
-                "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:01"
-            ),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:01"
+                .parse::<OutPoint>(),
             Err(ParseOutPointError::VoutNotCanonical)
         );
         assert_eq!(
-            OutPoint::from_str(
-                "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:+42"
-            ),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:+42"
+                .parse::<OutPoint>(),
             Err(ParseOutPointError::VoutNotCanonical)
         );
         assert_eq!(
-            OutPoint::from_str("i don't care:1"),
+            "i don't care:1".parse::<OutPoint>(),
             Err(ParseOutPointError::Txid("i don't care".parse::<Txid>().unwrap_err()))
         );
         assert_eq!(
-            OutPoint::from_str(
-                "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c945X:1"
-            ),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c945X:1"
+                .parse::<OutPoint>(),
             Err(ParseOutPointError::Txid(
                 "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c945X"
                     .parse::<Txid>()
@@ -1489,16 +1501,14 @@ mod tests {
             ))
         );
         assert_eq!(
-            OutPoint::from_str(
-                "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:lol"
-            ),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:lol"
+                .parse::<OutPoint>(),
             Err(ParseOutPointError::Vout(parse::int::<u32, _>("lol").unwrap_err()))
         );
 
         assert_eq!(
-            OutPoint::from_str(
-                "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:42"
-            ),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:42"
+                .parse::<OutPoint>(),
             Ok(OutPoint {
                 txid: "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456"
                     .parse()
@@ -1507,9 +1517,8 @@ mod tests {
             })
         );
         assert_eq!(
-            OutPoint::from_str(
-                "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:0"
-            ),
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:0"
+                .parse::<OutPoint>(),
             Ok(OutPoint {
                 txid: "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456"
                     .parse()
@@ -1805,7 +1814,7 @@ mod tests {
         ];
         for (s, sht) in sighashtypes {
             assert_eq!(sht.to_string(), s);
-            assert_eq!(EcdsaSighashType::from_str(s).unwrap(), sht);
+            assert_eq!(s.parse::<EcdsaSighashType>().unwrap(), sht);
         }
         let sht_mistakes = [
             "SIGHASH_ALL | SIGHASH_ANYONECANPAY",
@@ -1821,7 +1830,7 @@ mod tests {
         ];
         for s in sht_mistakes {
             assert_eq!(
-                EcdsaSighashType::from_str(s).unwrap_err().to_string(),
+                s.parse::<EcdsaSighashType>().unwrap_err().to_string(),
                 format!("unrecognized SIGHASH string '{}'", s)
             );
         }
@@ -1956,13 +1965,13 @@ mod tests {
 
     #[test]
     fn effective_value_happy_path() {
-        let value = Amount::from_str("1 cBTC").unwrap();
+        let value = "1 cBTC".parse::<Amount>().unwrap();
         let fee_rate = FeeRate::from_sat_per_kwu(10);
         let satisfaction_weight = Weight::from_wu(204);
         let effective_value = effective_value(fee_rate, satisfaction_weight, value).unwrap();
 
         // 10 sat/kwu * (204wu + BASE_WEIGHT) = 4 sats
-        let expected_fee = SignedAmount::from_str("4 sats").unwrap();
+        let expected_fee = "4 sats".parse::<SignedAmount>().unwrap();
         let expected_effective_value = value.to_signed().unwrap() - expected_fee;
         assert_eq!(effective_value, expected_effective_value);
     }

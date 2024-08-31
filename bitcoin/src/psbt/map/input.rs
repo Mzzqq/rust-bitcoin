@@ -170,7 +170,7 @@ impl FromStr for PsbtSighashType {
         // NB: some of Taproot sighash types are non-standard for pre-Taproot
         // inputs. We also do not support SIGHASH_RESERVED in verbatim form
         // ("0xFF" string should be used instead).
-        if let Ok(ty) = TapSighashType::from_str(s) {
+        if let Ok(ty) = s.parse::<TapSighashType>() {
             return Ok(ty.into());
         }
 
@@ -523,7 +523,7 @@ mod test {
         ] {
             let sighash = PsbtSighashType::from(*ecdsa);
             let s = format!("{}", sighash);
-            let back = PsbtSighashType::from_str(&s).unwrap();
+            let back = s.parse::<PsbtSighashType>().unwrap();
             assert_eq!(back, sighash);
             assert_eq!(back.ecdsa_hash_ty().unwrap(), *ecdsa);
         }
@@ -542,7 +542,7 @@ mod test {
         ] {
             let sighash = PsbtSighashType::from(*tap);
             let s = format!("{}", sighash);
-            let back = PsbtSighashType::from_str(&s).unwrap();
+            let back = s.parse::<PsbtSighashType>().unwrap();
             assert_eq!(back, sighash);
             assert_eq!(back.taproot_hash_ty().unwrap(), *tap);
         }
@@ -553,7 +553,7 @@ mod test {
         let nonstd = 0xdddddddd;
         let sighash = PsbtSighashType { inner: nonstd };
         let s = format!("{}", sighash);
-        let back = PsbtSighashType::from_str(&s).unwrap();
+        let back = s.parse::<PsbtSighashType>().unwrap();
 
         assert_eq!(back, sighash);
         assert_eq!(back.ecdsa_hash_ty(), Err(NonStandardSighashTypeError(nonstd)));

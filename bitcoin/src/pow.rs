@@ -1865,11 +1865,9 @@ mod tests {
 
     #[test]
     fn target_is_met_by_for_target_equals_hash() {
-        use std::str::FromStr;
-
-        let hash =
-            BlockHash::from_str("ef537f25c895bfa782526529a9b63d97aa631564d5d789c2b765448c8635fb6c")
-                .expect("failed to parse block hash");
+        let hash = "ef537f25c895bfa782526529a9b63d97aa631564d5d789c2b765448c8635fb6c"
+            .parse::<BlockHash>()
+            .expect("failed to parse block hash");
         let target = Target(U256::from_le_bytes(hash.to_byte_array()));
         assert!(target.is_met_by(hash));
     }
@@ -1930,7 +1928,7 @@ mod tests {
     #[test]
     fn work_log2() {
         // Compare work log2 to historical Bitcoin Core values found in Core logs.
-        let tests: [(u128, f64); 5] = [
+        let tests: &[(u128, f64)] = &[
             // (chainwork, core log2)                // height
             (0x200020002, 33.000022),                // 1
             (0xa97d67041c5e51596ee7, 79.405055),     // 308004
@@ -1939,7 +1937,7 @@ mod tests {
             (0x2ef447e01d1642c40a184ada, 93.553183), // 738965
         ];
 
-        for (chainwork, core_log2) in tests {
+        for &(chainwork, core_log2) in tests {
             // Core log2 in the logs is rounded to 6 decimal places.
             let log2 = (Work::from(chainwork).log2() * 1e6).round() / 1e6;
             assert_eq!(log2, core_log2)
