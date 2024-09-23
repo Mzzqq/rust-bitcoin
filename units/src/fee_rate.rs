@@ -5,14 +5,13 @@
 use core::fmt;
 use core::ops::{Div, Mul};
 
+#[cfg(feature = "arbitrary")]
+use arbitrary::{Arbitrary, Unstructured};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::amount::Amount;
 use crate::weight::Weight;
-
-#[cfg(feature = "arbitrary")]
-use arbitrary::{Arbitrary, Unstructured};
 
 /// Represents fee rate.
 ///
@@ -87,6 +86,9 @@ impl FeeRate {
     /// Checked weight multiplication.
     ///
     /// Computes the absolute fee amount for a given [`Weight`] at this fee rate.
+    /// When the resulting fee is a non-integer amount, the amount is rounded up,
+    /// ensuring that the transaction fee is enough instead of falling short if
+    /// rounded down.
     ///
     /// [`None`] is returned if an overflow occurred.
     pub fn checked_mul_by_weight(self, rhs: Weight) -> Option<Amount> {

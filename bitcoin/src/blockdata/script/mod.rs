@@ -65,6 +65,8 @@ use core::fmt;
 use core::ops::{Deref, DerefMut};
 
 use hashes::{hash160, sha256};
+use internals::impl_to_hex_from_lower_hex;
+use internals::script::{self, PushDataLenLen};
 use io::{BufRead, Write};
 
 use crate::consensus::{encode, Decodable, Encodable};
@@ -293,28 +295,6 @@ pub fn read_scriptbool(v: &[u8]) -> bool {
     }
 }
 
-// We internally use implementation based on iterator so that it automatically advances as needed
-// Errors are same as above, just different type.
-fn read_uint_iter(data: &mut core::slice::Iter<'_, u8>, size: usize) -> Result<usize, UintError> {
-    if data.len() < size {
-        Err(UintError::EarlyEndOfScript)
-    } else if size > usize::from(u16::MAX / 8) {
-        // Casting to u32 would overflow
-        Err(UintError::NumericOverflow)
-    } else {
-        let mut ret = 0;
-        for (i, item) in data.take(size).enumerate() {
-            ret = usize::from(*item)
-                // Casting is safe because we checked above to not repeat the same check in a loop
-                .checked_shl((i * 8) as u32)
-                .ok_or(UintError::NumericOverflow)?
-                .checked_add(ret)
-                .ok_or(UintError::NumericOverflow)?;
-        }
-        Ok(ret)
-    }
-}
-
 fn opcode_to_verify(opcode: Option<Opcode>) -> Option<Opcode> {
     opcode.and_then(|opcode| match opcode {
         OP_EQUAL => Some(OP_EQUALVERIFY),
@@ -435,7 +415,7 @@ impl AsMut<[u8]> for ScriptBuf {
 impl fmt::Debug for Script {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("Script(")?;
-        self.fmt_asm(f)?;
+        bytes_to_asm_fmt(self.as_ref(), f)?;
         f.write_str(")")
     }
 }
@@ -446,7 +426,7 @@ impl fmt::Debug for ScriptBuf {
 
 impl fmt::Display for Script {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { self.fmt_asm(f) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { bytes_to_asm_fmt(self.as_ref(), f) }
 }
 
 impl fmt::Display for ScriptBuf {
@@ -459,11 +439,13 @@ impl fmt::LowerHex for Script {
         fmt::LowerHex::fmt(&self.as_bytes().as_hex(), f)
     }
 }
+impl_to_hex_from_lower_hex!(Script, |script: &Script| script.len() * 2);
 
 impl fmt::LowerHex for ScriptBuf {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { fmt::LowerHex::fmt(self.as_script(), f) }
 }
+impl_to_hex_from_lower_hex!(ScriptBuf, |script_buf: &ScriptBuf| script_buf.len() * 2);
 
 impl fmt::UpperHex for Script {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -634,14 +616,14 @@ impl<'de> serde::Deserialize<'de> for ScriptBuf {
 impl Encodable for Script {
     #[inline]
     fn consensus_encode<W: Write + ?Sized>(&self, w: &mut W) -> Result<usize, io::Error> {
-        crate::consensus::encode::consensus_encode_with_size(&self.0, w)
+        crate::consensus::encode::consensus_encode_with_size(self.as_bytes(), w)
     }
 }
 
 impl Encodable for ScriptBuf {
     #[inline]
     fn consensus_encode<W: Write + ?Sized>(&self, w: &mut W) -> Result<usize, io::Error> {
-        self.0.consensus_encode(w)
+        self.as_script().consensus_encode(w)
     }
 }
 
@@ -650,7 +632,8 @@ impl Decodable for ScriptBuf {
     fn consensus_decode_from_finite_reader<R: BufRead + ?Sized>(
         r: &mut R,
     ) -> Result<Self, encode::Error> {
-        Ok(ScriptBuf(Decodable::consensus_decode_from_finite_reader(r)?))
+        let v: Vec<u8> = Decodable::consensus_decode_from_finite_reader(r)?;
+        Ok(ScriptBuf::from_bytes(v))
     }
 }
 
@@ -658,25 +641,15 @@ impl Decodable for ScriptBuf {
 pub(super) fn bytes_to_asm_fmt(script: &[u8], f: &mut dyn fmt::Write) -> fmt::Result {
     // This has to be a macro because it needs to break the loop
     macro_rules! read_push_data_len {
-        ($iter:expr, $len:literal, $formatter:expr) => {
-            match read_uint_iter($iter, $len) {
-                Ok(n) => {
-                    n
-                },
-                Err(UintError::EarlyEndOfScript) => {
+        ($iter:expr, $size:path, $formatter:expr) => {
+            match script::read_push_data_len($iter, $size) {
+                Ok(n) => n,
+                Err(_) => {
                     $formatter.write_str("<unexpected end>")?;
                     break;
                 }
-                // We got the data in a slice which implies it being shorter than `usize::MAX`
-                // So if we got overflow, we can confidently say the number is higher than length of
-                // the slice even though we don't know the exact number. This implies attempt to push
-                // past end.
-                Err(UintError::NumericOverflow) => {
-                    $formatter.write_str("<push past end>")?;
-                    break;
-                }
             }
-        }
+        };
     }
 
     let mut iter = script.iter();
@@ -695,15 +668,15 @@ pub(super) fn bytes_to_asm_fmt(script: &[u8], f: &mut dyn fmt::Write) -> fmt::Re
             match opcode {
                 OP_PUSHDATA1 => {
                     // side effects: may write and break from the loop
-                    read_push_data_len!(&mut iter, 1, f)
+                    read_push_data_len!(&mut iter, PushDataLenLen::One, f)
                 }
                 OP_PUSHDATA2 => {
                     // side effects: may write and break from the loop
-                    read_push_data_len!(&mut iter, 2, f)
+                    read_push_data_len!(&mut iter, PushDataLenLen::Two, f)
                 }
                 OP_PUSHDATA4 => {
                     // side effects: may write and break from the loop
-                    read_push_data_len!(&mut iter, 4, f)
+                    read_push_data_len!(&mut iter, PushDataLenLen::Four, f)
                 }
                 _ => 0,
             }
@@ -784,24 +757,6 @@ impl std::error::Error for Error {
             | NumericOverflow
             | UnknownSpentOutput(_)
             | Serialization => None,
-        }
-    }
-}
-
-// Our internal error proves that we only return these two cases from `read_uint_iter`.
-// Since it's private we don't bother with trait impls besides From.
-enum UintError {
-    EarlyEndOfScript,
-    NumericOverflow,
-}
-
-internals::impl_from_infallible!(UintError);
-
-impl From<UintError> for Error {
-    fn from(error: UintError) -> Self {
-        match error {
-            UintError::EarlyEndOfScript => Error::EarlyEndOfScript,
-            UintError::NumericOverflow => Error::NumericOverflow,
         }
     }
 }

@@ -8,6 +8,8 @@
 use core::cmp::Ordering;
 use core::fmt;
 
+#[cfg(feature = "arbitrary")]
+use arbitrary::{Arbitrary, Unstructured};
 #[cfg(all(test, mutate))]
 use mutagen::mutate;
 use units::parse::{self, PrefixedHexError, UnprefixedHexError};
@@ -46,7 +48,7 @@ pub use units::locktime::absolute::*;
 /// # let n = LockTime::from_consensus(741521);          // n OP_CHECKLOCKTIMEVERIFY
 /// # let lock_time = LockTime::from_consensus(741521);  // nLockTime
 /// // To compare absolute lock times there are various `is_satisfied_*` methods, you may also use:
-/// let is_satisfied = match (n, lock_time) {
+/// let _is_satisfied = match (n, lock_time) {
 ///     (Blocks(n), Blocks(lock_time)) => n <= lock_time,
 ///     (Seconds(n), Seconds(lock_time)) => n <= lock_time,
 ///     _ => panic!("handle invalid comparison error"),
@@ -108,7 +110,6 @@ impl LockTime {
     ///
     /// ```rust
     /// # use bitcoin_primitives::absolute::LockTime;
-    /// # let n = LockTime::from_consensus(741521); // n OP_CHECKLOCKTIMEVERIFY
     ///
     /// // `from_consensus` roundtrips as expected with `to_consensus_u32`.
     /// let n_lock_time: u32 = 741521;
@@ -237,7 +238,7 @@ impl LockTime {
     /// # Examples
     ///
     /// ```rust
-    /// # use bitcoin_primitives::absolute::{LockTime, LockTime::*};
+    /// # use bitcoin_primitives::absolute::LockTime;
     /// let lock_time = LockTime::from_consensus(741521);
     /// let check = LockTime::from_consensus(741521 + 1);
     /// assert!(lock_time.is_implied_by(check));
@@ -270,7 +271,7 @@ impl LockTime {
     /// # let n = LockTime::from_consensus(741521);              // n OP_CHECKLOCKTIMEVERIFY
     /// # let lock_time = LockTime::from_consensus(741521 + 1);  // nLockTime
     ///
-    /// let is_satisfied = match (n, lock_time) {
+    /// let _is_satisfied = match (n, lock_time) {
     ///     (Blocks(n), Blocks(lock_time)) => n <= lock_time,
     ///     (Seconds(n), Seconds(lock_time)) => n <= lock_time,
     ///     _ => panic!("invalid comparison"),
@@ -392,6 +393,14 @@ impl ordered::ArbitraryOrd for LockTime {
             (Blocks(this), Blocks(that)) => this.cmp(that),
             (Seconds(this), Seconds(that)) => this.cmp(that),
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for LockTime {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let l = u32::arbitrary(u)?;
+        Ok(LockTime::from_consensus(l))
     }
 }
 

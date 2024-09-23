@@ -13,11 +13,10 @@ use core::{default, fmt, ops};
 
 #[cfg(feature = "serde")]
 use ::serde::{Deserialize, Serialize};
-use internals::error::InputString;
-use internals::write_err;
-
 #[cfg(feature = "arbitrary")]
 use arbitrary::{Arbitrary, Unstructured};
+use internals::error::InputString;
+use internals::write_err;
 
 /// A set of denominations in which amounts can be expressed.
 ///
@@ -1158,7 +1157,30 @@ impl ops::DivAssign<u64> for Amount {
 impl FromStr for Amount {
     type Err = ParseError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> { Amount::from_str_with_denomination(s) }
+    /// Parses a string slice where the slice includes a denomination.
+    ///
+    /// If the string slice is zero, then no denomination is required.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Amount)` if the string amount and denomination parse successfully,
+    /// otherwise, return `Err(ParseError)`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let result = Amount::from_str_with_denomination(s);
+
+        match result {
+            Err(ParseError::MissingDenomination(_)) => {
+                let d = Amount::from_str_in(s, Denomination::Satoshi);
+
+                if d == Ok(Amount::ZERO) {
+                    Ok(Amount::ZERO)
+                } else {
+                    result
+                }
+            }
+            _ => result,
+        }
+    }
 }
 
 impl TryFrom<SignedAmount> for Amount {
@@ -1182,9 +1204,13 @@ impl core::iter::Sum for Amount {
 /// * Show or hide denomination
 /// * Dynamically-selected denomination - show in sats if less than 1 BTC.
 ///
-/// However this can still be combined with [`fmt::Formatter`] options to precisely control zeros,
+/// However, this can still be combined with [`fmt::Formatter`] options to precisely control zeros,
 /// padding, alignment... The formatting works like floats from `core` but note that precision will
 /// **never** be lossy - that means no rounding.
+///
+/// Note: This implementation is currently **unstable**. The only thing that we can promise is that
+/// unless the precision is changed, this will display an accurate, human-readable number, and the
+/// default serialization (one with unmodified [`fmt::Formatter`] options) will round-trip with [`FromStr`]
 ///
 /// See [`Amount::display_in`] and [`Amount::display_dynamic`] on how to construct this.
 #[derive(Debug, Clone)]
@@ -1577,7 +1603,30 @@ impl ops::Neg for SignedAmount {
 impl FromStr for SignedAmount {
     type Err = ParseError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> { SignedAmount::from_str_with_denomination(s) }
+    /// Parses a string slice where the slice includes a denomination.
+    ///
+    /// If the string slice is zero or negative zero, then no denomination is required.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Amount)` if the string amount and denomination parse successfully,
+    /// otherwise, return `Err(ParseError)`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let result = SignedAmount::from_str_with_denomination(s);
+
+        match result {
+            Err(ParseError::MissingDenomination(_)) => {
+                let d = SignedAmount::from_str_in(s, Denomination::Satoshi);
+
+                if d == Ok(SignedAmount::ZERO) {
+                    Ok(SignedAmount::ZERO)
+                } else {
+                    result
+                }
+            }
+            _ => result,
+        }
+    }
 }
 
 impl TryFrom<Amount> for SignedAmount {
@@ -1646,6 +1695,7 @@ pub mod serde {
     #![allow(missing_docs)]
 
     //! This module adds serde serialization and deserialization support for Amounts.
+    //!
     //! Since there is not a default way to serialize and deserialize Amounts, multiple
     //! ways are supported and it's up to the user to decide which serialiation to use.
     //! The provided modules can be used as follows:
@@ -2073,6 +2123,25 @@ mod tests {
                 Ok(amount) => assert_eq!(amount, SignedAmount::from_sat(0)),
             }
         }
+    }
+
+    #[test]
+    fn from_str_zero_without_denomination() {
+        let _a = Amount::from_str("0").unwrap();
+        let _a = Amount::from_str("0.0").unwrap();
+        let _a = Amount::from_str("00.0").unwrap();
+
+        assert!(Amount::from_str("-0").is_err());
+        assert!(Amount::from_str("-0.0").is_err());
+        assert!(Amount::from_str("-00.0").is_err());
+
+        let _a = SignedAmount::from_str("-0").unwrap();
+        let _a = SignedAmount::from_str("-0.0").unwrap();
+        let _a = SignedAmount::from_str("-00.0").unwrap();
+
+        let _a = SignedAmount::from_str("0").unwrap();
+        let _a = SignedAmount::from_str("0.0").unwrap();
+        let _a = SignedAmount::from_str("00.0").unwrap();
     }
 
     #[test]

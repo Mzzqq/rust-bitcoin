@@ -97,7 +97,8 @@ fn senders_keys<C: Signing>(secp: &Secp256k1<C>) -> Keypair {
 ///
 /// (FWIW this is an arbitrary mainnet address from block 805222.)
 fn receivers_address() -> Address {
-    "bc1p0dq0tzg2r780hldthn5mrznmpxsxc0jux5f20fwj0z3wqxxk6fpqm7q0va".parse::<Address<_>>()
+    "bc1p0dq0tzg2r780hldthn5mrznmpxsxc0jux5f20fwj0z3wqxxk6fpqm7q0va"
+        .parse::<Address<_>>()
         .expect("a valid address")
         .require_network(Network::Bitcoin)
         .expect("valid address for mainnet")
@@ -118,7 +119,7 @@ fn dummy_unspent_transaction_output<C: Verification>(
     let script_pubkey = ScriptBuf::new_p2tr(secp, internal_key, None);
 
     let out_point = OutPoint {
-        txid: Txid::all_zeros(), // Obviously invalid.
+        txid: Txid::from_byte_array([0xFF; 32]), // Arbitrary invalid dummy value.
         vout: 0,
     };
 

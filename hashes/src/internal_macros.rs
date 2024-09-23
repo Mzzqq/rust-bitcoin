@@ -7,10 +7,8 @@ macro_rules! arr_newtype_fmt_impl {
         impl<$($gen: $gent),*> $crate::_export::_core::fmt::LowerHex for $ty<$($gen),*> {
             #[inline]
             fn fmt(&self, f: &mut $crate::_export::_core::fmt::Formatter) -> $crate::_export::_core::fmt::Result {
-                #[allow(unused)]
-                use crate::Hash as _;
                 let case = $crate::hex::Case::Lower;
-                if <$ty<$($gen),*>>::DISPLAY_BACKWARD {
+                if <$ty<$($gen),*> as crate::Hash>::DISPLAY_BACKWARD {
                     $crate::hex::fmt_hex_exact!(f, $bytes, self.0.iter().rev(), case)
                 } else {
                     $crate::hex::fmt_hex_exact!(f, $bytes, self.0.iter(), case)
@@ -21,10 +19,8 @@ macro_rules! arr_newtype_fmt_impl {
         impl<$($gen: $gent),*> $crate::_export::_core::fmt::UpperHex for $ty<$($gen),*> {
             #[inline]
             fn fmt(&self, f: &mut $crate::_export::_core::fmt::Formatter) -> $crate::_export::_core::fmt::Result {
-                #[allow(unused)]
-                use crate::Hash as _;
                 let case = $crate::hex::Case::Upper;
-                if <$ty<$($gen),*>>::DISPLAY_BACKWARD {
+                if <$ty<$($gen),*> as crate::Hash>::DISPLAY_BACKWARD {
                     $crate::hex::fmt_hex_exact!(f, $bytes, self.0.iter().rev(), case)
                 } else {
                     $crate::hex::fmt_hex_exact!(f, $bytes, self.0.iter(), case)
@@ -99,16 +95,15 @@ macro_rules! hash_trait_impls {
             }
         }
 
-        impl<$($gen: $gent),*> crate::GeneralHash for Hash<$($gen),*> {
+        impl<$($gen: $gent),*> $crate::GeneralHash for Hash<$($gen),*> {
             type Engine = HashEngine;
 
             fn from_engine(e: HashEngine) -> Hash<$($gen),*> { Self::from_engine(e) }
         }
 
-        impl<$($gen: $gent),*> crate::Hash for Hash<$($gen),*> {
+        impl<$($gen: $gent),*> $crate::Hash for Hash<$($gen),*> {
             type Bytes = [u8; $bits / 8];
 
-            const LEN: usize = $bits / 8;
             const DISPLAY_BACKWARD: bool = $reverse;
 
             fn from_slice(sl: &[u8]) -> $crate::_export::_core::result::Result<Hash<$($gen),*>, $crate::FromSliceError> {
@@ -149,7 +144,7 @@ macro_rules! hash_type {
 
             /// Hashes some bytes.
             #[allow(clippy::self_named_constructors)] // Hash is a noun and a verb.
-            pub fn hash(data: &[u8]) -> Self { <Self as crate::GeneralHash>::hash(data) }
+            pub fn hash(data: &[u8]) -> Self { <Self as $crate::GeneralHash>::hash(data) }
 
             /// Hashes all the byte slices retrieved from the iterator together.
             pub fn hash_byte_chunks<B, I>(byte_slices: I) -> Self
@@ -157,13 +152,13 @@ macro_rules! hash_type {
                 B: AsRef<[u8]>,
                 I: IntoIterator<Item = B>,
             {
-                <Self as crate::GeneralHash>::hash_byte_chunks(byte_slices)
+                <Self as $crate::GeneralHash>::hash_byte_chunks(byte_slices)
             }
 
             /// Hashes the entire contents of the `reader`.
             #[cfg(feature = "bitcoin-io")]
             pub fn hash_reader<R: io::BufRead>(reader: &mut R) -> Result<Self, io::Error> {
-                <Self as crate::GeneralHash>::hash_reader(reader)
+                <Self as $crate::GeneralHash>::hash_reader(reader)
             }
         }
     };
@@ -246,7 +241,48 @@ macro_rules! hash_type_no_default {
             }
         }
 
-        crate::internal_macros::hash_trait_impls!($bits, $reverse);
+        $crate::internal_macros::hash_trait_impls!($bits, $reverse);
+
+        $crate::internal_macros::impl_io_write!(
+            HashEngine,
+            |us: &mut HashEngine, buf| {
+                crate::HashEngine::input(us, buf);
+                Ok(buf.len())
+            },
+            |_us| { Ok(()) }
+        );
     };
 }
 pub(crate) use hash_type_no_default;
+
+// We do not use the `bitcoin_io::impl_write` macro because we don't have an unconditional
+// dependency on `bitcoin-io` and we want to implement `std:io::Write` even when we don't depend on
+// `bitcoin-io`.
+macro_rules! impl_io_write {
+    ($ty: ty, $write_fn: expr, $flush_fn: expr $(, $bounded_ty: ident : $bounds: path),*) => {
+        #[cfg(feature = "bitcoin-io")]
+        impl<$($bounded_ty: $bounds),*> bitcoin_io::Write for $ty {
+            #[inline]
+            fn write(&mut self, buf: &[u8]) -> bitcoin_io::Result<usize> {
+                $write_fn(self, buf)
+            }
+            #[inline]
+            fn flush(&mut self) -> bitcoin_io::Result<()> {
+                $flush_fn(self)
+            }
+        }
+
+        #[cfg(feature = "std")]
+        impl<$($bounded_ty: $bounds),*> std::io::Write for $ty {
+            #[inline]
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                $write_fn(self, buf)
+            }
+            #[inline]
+            fn flush(&mut self) -> std::io::Result<()> {
+                $flush_fn(self)
+            }
+        }
+    }
+}
+pub(crate) use impl_io_write;

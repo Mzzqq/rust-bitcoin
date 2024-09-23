@@ -13,6 +13,7 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Coding conventions.
 #![warn(missing_docs)]
+#![doc(test(attr(warn(unused))))]
 // Exclude lints we don't think are valuable.
 #![allow(clippy::needless_question_mark)] // https://github.com/rust-bitcoin/rust-bitcoin/pull/2134
 #![allow(clippy::manual_range_contains)] // More readable than clippy's format.
@@ -33,6 +34,7 @@ pub mod locktime;
 pub mod opcodes;
 pub mod pow;
 pub mod sequence;
+pub mod transaction;
 
 #[doc(inline)]
 pub use units::*;
@@ -41,11 +43,15 @@ pub use units::*;
 #[cfg(feature = "alloc")]
 pub use self::locktime::{absolute, relative};
 #[doc(inline)]
-pub use self::{pow::CompactTarget, sequence::Sequence};
+pub use self::{
+    pow::CompactTarget,
+    sequence::Sequence,
+    transaction::{Txid, Wtxid},
+};
 
 #[rustfmt::skip]
 #[allow(unused_imports)]
 mod prelude {
     #[cfg(feature = "alloc")]
-    pub use alloc::string::ToString;
+    pub use alloc::string::{String, ToString};
 }

@@ -12,6 +12,8 @@
 
 use core::{cmp, fmt, str};
 
+#[cfg(feature = "arbitrary")]
+use arbitrary::{Arbitrary, Unstructured};
 use hashes::sha256d;
 use internals::{write_err, ToU64 as _};
 use io::{BufRead, Write};
@@ -29,42 +31,29 @@ use crate::sighash::{EcdsaSighashType, TapSighashType};
 use crate::witness::Witness;
 use crate::{Amount, FeeRate, SignedAmount, VarInt};
 
-#[cfg(feature = "arbitrary")]
-use arbitrary::{Arbitrary, Unstructured};
+#[rustfmt::skip]            // Keep public re-exports separate.
+#[doc(inline)]
+pub use primitives::transaction::*;
 
-hashes::hash_newtype! {
-    /// A bitcoin transaction hash/transaction ID.
-    ///
-    /// For compatibility with the existing Bitcoin infrastructure and historical and current
-    /// versions of the Bitcoin Core software itself, this and other [`sha256d::Hash`] types, are
-    /// serialized in reverse byte order when converted to a hex string via [`std::fmt::Display`]
-    /// trait operations.
-    ///
-    /// See [`hashes::Hash::DISPLAY_BACKWARD`] for more details.
-    pub struct Txid(sha256d::Hash);
-
-    /// A bitcoin witness transaction ID.
-    pub struct Wtxid(sha256d::Hash);
-}
 impl_hashencode!(Txid);
 impl_hashencode!(Wtxid);
 
-impl Txid {
-    /// The "all zeros" TXID.
-    ///
-    /// This is used as the "txid" of the dummy input of a coinbase transaction. It is
-    /// not a real TXID and should not be used in other contexts.
-    pub fn all_zeros() -> Self { Self::from_byte_array([0; 32]) }
+crate::internal_macros::define_extension_trait! {
+    /// Extension functionality for the [`Txid`] type.
+    pub trait TxidExt impl for Txid {
+        /// The "all zeros" TXID.
+        #[deprecated(since = "TBD", note = "use Txid::COINBASE_PREVOUT instead")]
+        fn all_zeros() -> Self { Self::COINBASE_PREVOUT }
+    }
 }
 
-impl Wtxid {
-    /// The "all zeros" wTXID.
-    ///
-    /// This is used as the wTXID for the coinbase transaction when constructing blocks,
-    /// since the coinbase transaction contains a commitment to all transactions' wTXIDs
-    /// but naturally cannot commit to its own. It is not a real wTXID and should not be
-    /// used in other contexts.
-    pub fn all_zeros() -> Self { Self::from_byte_array([0; 32]) }
+crate::internal_macros::define_extension_trait! {
+    /// Extension functionality for the [`Wtxid`] type.
+    pub trait WtxidExt impl for Wtxid {
+        /// The "all zeros" wTXID.
+        #[deprecated(since = "TBD", note = "use Wtxid::COINBASE instead")]
+        fn all_zeros() -> Self { Self::COINBASE }
+    }
 }
 
 /// Trait that abstracts over a transaction identifier i.e., `Txid` and `Wtxid`.
@@ -103,15 +92,21 @@ impl OutPoint {
     /// The number of bytes that an outpoint contributes to the size of a transaction.
     const SIZE: usize = 32 + 4; // The serialized lengths of txid and vout.
 
+    /// The `OutPoint` used in a coinbase prevout.
+    ///
+    /// This is used as the dummy input for coinbase transactions because they don't have any
+    /// previous outputs. In other words, does not point to a real transaction.
+    pub const COINBASE_PREVOUT: Self = Self { txid: Txid::COINBASE_PREVOUT, vout: u32::MAX };
+
     /// Creates a new [`OutPoint`].
     #[inline]
+    #[deprecated(since = "TBD", note = "use struct initialization syntax instead")]
     pub const fn new(txid: Txid, vout: u32) -> OutPoint { OutPoint { txid, vout } }
 
     /// Creates a "null" `OutPoint`.
-    ///
-    /// This value is used for coinbase transactions because they don't have any previous outputs.
     #[inline]
-    pub fn null() -> OutPoint { OutPoint { txid: Txid::all_zeros(), vout: u32::MAX } }
+    #[deprecated(since = "TBD", note = "use OutPoint::COINBASE_PREVOUT instead")]
+    pub fn null() -> OutPoint { Self::COINBASE_PREVOUT }
 
     /// Checks if an `OutPoint` is "null".
     ///
@@ -119,7 +114,7 @@ impl OutPoint {
     ///
     /// ```rust
     /// use bitcoin::constants::genesis_block;
-    /// use bitcoin::{params, Network};
+    /// use bitcoin::params;
     ///
     /// let block = genesis_block(&params::MAINNET);
     /// let tx = &block.txdata[0];
@@ -128,6 +123,7 @@ impl OutPoint {
     /// assert!(tx.input[0].previous_output.is_null());
     /// ```
     #[inline]
+    #[deprecated(since = "TBD", note = "use outpoint == OutPoint::COINBASE_PREVOUT instead")]
     pub fn is_null(&self) -> bool { *self == OutPoint::null() }
 }
 
@@ -411,10 +407,7 @@ crate::internal_macros::define_extension_trait! {
 #[cfg(feature = "arbitrary")]
 impl<'a> Arbitrary<'a> for TxOut {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        Ok(TxOut {
-            value: Amount::arbitrary(u)?,
-            script_pubkey: ScriptBuf::arbitrary(u)?,
-        })
+        Ok(TxOut { value: Amount::arbitrary(u)?, script_pubkey: ScriptBuf::arbitrary(u)? })
     }
 }
 
@@ -568,7 +561,7 @@ impl Transaction {
         self.input.consensus_encode(&mut enc).expect("engines don't error");
         self.output.consensus_encode(&mut enc).expect("engines don't error");
         self.lock_time.consensus_encode(&mut enc).expect("engines don't error");
-        Txid(sha256d::Hash::from_engine(enc))
+        Txid::from_byte_array(sha256d::Hash::from_engine(enc).to_byte_array())
     }
 
     /// Computes the segwit version of the transaction id.
@@ -589,7 +582,7 @@ impl Transaction {
     pub fn compute_wtxid(&self) -> Wtxid {
         let mut enc = sha256d::Hash::engine();
         self.consensus_encode(&mut enc).expect("engines don't error");
-        Wtxid(sha256d::Hash::from_engine(enc))
+        Wtxid::from_byte_array(sha256d::Hash::from_engine(enc).to_byte_array())
     }
 
     /// Returns the weight of this transaction, as defined by BIP-141.
@@ -683,7 +676,7 @@ impl Transaction {
     /// all-zeros (creates satoshis "out of thin air").
     #[doc(alias = "is_coin_base")] // method previously had this name
     pub fn is_coinbase(&self) -> bool {
-        self.input.len() == 1 && self.input[0].previous_output.is_null()
+        self.input.len() == 1 && self.input[0].previous_output == OutPoint::COINBASE_PREVOUT
     }
 
     /// Returns `true` if the transaction itself opted in to be BIP-125-replaceable (RBF).
@@ -929,31 +922,15 @@ impl std::error::Error for IndexOutOfBoundsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { None }
 }
 
-/// The transaction version.
-///
-/// Currently, as specified by [BIP-68], only version 1 and 2 are considered standard.
-///
-/// Standardness of the inner `i32` is not an invariant because you are free to create transactions
-/// of any version, transactions with non-standard version numbers will not be relayed by the
-/// Bitcoin network.
-///
-/// [BIP-68]: https://github.com/bitcoin/bips/blob/master/bip-0068.mediawiki
-#[derive(Copy, PartialEq, Eq, Clone, Debug, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Version(pub i32);
+crate::internal_macros::define_extension_trait! {
+    /// Extension functionality for the [`Version`] type.
+    pub trait VersionExt impl for Version {
+        /// Creates a non-standard transaction version.
+        fn non_standard(version: i32) -> Version { Self(version) }
 
-impl Version {
-    /// The original Bitcoin transaction version (pre-BIP-68).
-    pub const ONE: Self = Self(1);
-
-    /// The second Bitcoin transaction version (post-BIP-68).
-    pub const TWO: Self = Self(2);
-
-    /// Creates a non-standard transaction version.
-    pub fn non_standard(version: i32) -> Version { Self(version) }
-
-    /// Returns true if this transaction version number is considered standard.
-    pub fn is_standard(&self) -> bool { *self == Version::ONE || *self == Version::TWO }
+        /// Returns true if this transaction version number is considered standard.
+        fn is_standard(&self) -> bool { *self == Version::ONE || *self == Version::TWO }
+    }
 }
 
 impl Encodable for Version {
@@ -966,10 +943,6 @@ impl Decodable for Version {
     fn consensus_decode<R: BufRead + ?Sized>(r: &mut R) -> Result<Self, encode::Error> {
         Decodable::consensus_decode(r).map(Version)
     }
-}
-
-impl fmt::Display for Version {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { fmt::Display::fmt(&self.0, f) }
 }
 
 impl_consensus_encoding!(TxOut, value, script_pubkey);
@@ -1433,6 +1406,39 @@ impl InputWeightPrediction {
     /// not counting potential witness flag bytes or the witness count varint.
     pub const fn weight(&self) -> Weight {
         Weight::from_wu_usize(self.script_size * 4 + self.witness_size)
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for OutPoint {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(OutPoint { txid: Txid::arbitrary(u)?, vout: u32::arbitrary(u)? })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for TxIn {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(TxIn {
+            previous_output: OutPoint::arbitrary(u)?,
+            script_sig: ScriptBuf::arbitrary(u)?,
+            sequence: Sequence::arbitrary(u)?,
+            witness: Witness::arbitrary(u)?,
+        })
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for Transaction {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        use primitives::absolute::LockTime;
+
+        Ok(Transaction {
+            version: Version::arbitrary(u)?,
+            lock_time: LockTime::arbitrary(u)?,
+            input: Vec::<TxIn>::arbitrary(u)?,
+            output: Vec::<TxOut>::arbitrary(u)?,
+        })
     }
 }
 

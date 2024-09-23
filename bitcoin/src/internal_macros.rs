@@ -33,9 +33,7 @@ macro_rules! impl_consensus_encoding {
             fn consensus_decode<R: $crate::io::BufRead + ?Sized>(
                 r: &mut R,
             ) -> core::result::Result<$thing, $crate::consensus::encode::Error> {
-                use internals::ToU64 as _;
-
-                let mut r = r.take($crate::consensus::encode::MAX_VEC_SIZE.to_u64());
+                let mut r = r.take(internals::ToU64::to_u64($crate::consensus::encode::MAX_VEC_SIZE));
                 Ok($thing {
                     $($field: $crate::consensus::Decodable::consensus_decode(&mut r)?),+
                 })
@@ -181,7 +179,7 @@ macro_rules! impl_hashencode {
     ($hashtype:ident) => {
         impl $crate::consensus::Encodable for $hashtype {
             fn consensus_encode<W: $crate::io::Write + ?Sized>(&self, w: &mut W) -> core::result::Result<usize, $crate::io::Error> {
-                self.0.consensus_encode(w)
+                self.as_byte_array().consensus_encode(w)
             }
         }
 

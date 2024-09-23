@@ -15,16 +15,14 @@
 //! use bitcoin_hashes::Sha256;
 //!
 //! let bytes = [0u8; 5];
-//! let hash_of_bytes = Sha256::hash(&bytes);
-//! let hash_of_string = Sha256::hash("some string".as_bytes());
+//! let _hash_of_bytes = Sha256::hash(&bytes);
+//! let _hash_of_string = Sha256::hash("some string".as_bytes());
 //! ```
 //!
 //!
 //! Hashing content from a reader:
 //!
 //! ```rust
-//! use bitcoin_hashes::Sha256;
-//!
 //! #[cfg(std)]
 //! # fn main() -> std::io::Result<()> {
 //! let mut reader: &[u8] = b"hello"; // in real code, this could be a `File` or `TcpStream`
@@ -42,9 +40,6 @@
 //! Hashing content by [`std::io::Write`] on `HashEngine`:
 //!
 //! ```rust
-//! use bitcoin_hashes::Sha256;
-//! use std::io::Write;
-//!
 //! #[cfg(std)]
 //! # fn main() -> std::io::Result<()> {
 //! let mut part1: &[u8] = b"hello";
@@ -68,8 +63,10 @@
 #![cfg_attr(bench, feature(test))]
 // Coding conventions.
 #![warn(missing_docs)]
-// Instead of littering the codebase for non-fuzzing code just globally allow.
+#![doc(test(attr(warn(unused))))]
+// Instead of littering the codebase for non-fuzzing and bench code just globally allow.
 #![cfg_attr(hashes_fuzz, allow(dead_code, unused_imports))]
+#![cfg_attr(bench, allow(dead_code, unused_imports))]
 // Exclude lints we don't think are valuable.
 #![allow(clippy::needless_question_mark)] // https://github.com/rust-bitcoin/rust-bitcoin/pull/2134
 #![allow(clippy::manual_range_contains)] // More readable than clippy's format.
@@ -115,8 +112,6 @@ pub mod cmp;
 pub mod hash160;
 pub mod hkdf;
 pub mod hmac;
-#[cfg(feature = "bitcoin-io")]
-mod impls;
 pub mod ripemd160;
 pub mod sha1;
 pub mod sha256;
@@ -274,10 +269,10 @@ pub trait Hash:
     + convert::AsRef<[u8]>
 {
     /// The byte array that represents the hash internally.
-    type Bytes: hex::FromHex + Copy;
+    type Bytes: hex::FromHex + Copy + IsByteArray;
 
     /// Length of the hash, in bytes.
-    const LEN: usize;
+    const LEN: usize = Self::Bytes::LEN;
 
     /// Copies a byte slice into a hash object.
     fn from_slice(sl: &[u8]) -> Result<Self, FromSliceError>;
@@ -295,6 +290,23 @@ pub trait Hash:
 
     /// Constructs a hash from the underlying byte array.
     fn from_byte_array(bytes: Self::Bytes) -> Self;
+}
+
+/// Ensures that a type is an array.
+pub trait IsByteArray: AsRef<[u8]> + sealed::IsByteArray {
+    /// The length of the array.
+    const LEN: usize;
+}
+
+impl<const N: usize> IsByteArray for [u8; N] {
+    const LEN: usize = N;
+}
+
+mod sealed {
+    #[doc(hidden)]
+    pub trait IsByteArray {}
+
+    impl<const N: usize> IsByteArray for [u8; N] {}
 }
 
 /// Attempted to create a hash from an invalid length slice.

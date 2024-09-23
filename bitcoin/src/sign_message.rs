@@ -108,22 +108,25 @@ mod message_signing {
             serialized
         }
 
-        /// Create from a byte slice.
-        pub fn from_slice(bytes: &[u8]) -> Result<MessageSignature, MessageSignatureError> {
-            if bytes.len() != 65 {
-                return Err(MessageSignatureError::InvalidLength);
-            }
+        /// Creates a `MessageSignature` from a fixed-length array.
+        pub fn from_byte_array(bytes: &[u8; 65]) -> Result<MessageSignature, secp256k1::Error> {
             // We just check this here so we can safely subtract further.
             if bytes[0] < 27 {
-                return Err(MessageSignatureError::InvalidEncoding(
-                    secp256k1::Error::InvalidRecoveryId,
-                ));
+                return Err(secp256k1::Error::InvalidRecoveryId);
             };
             let recid = RecoveryId::from_i32(((bytes[0] - 27) & 0x03) as i32)?;
             Ok(MessageSignature {
                 signature: RecoverableSignature::from_compact(&bytes[1..], recid)?,
                 compressed: ((bytes[0] - 27) & 0x04) != 0,
             })
+        }
+
+        /// Create a `MessageSignature` from a byte slice.
+        #[deprecated(since = "TBD", note = "Use `from_byte_array` instead.")]
+        pub fn from_slice(bytes: &[u8]) -> Result<MessageSignature, MessageSignatureError> {
+            let byte_array: [u8; 65] =
+                bytes.try_into().map_err(|_| MessageSignatureError::InvalidLength)?;
+            Self::from_byte_array(&byte_array).map_err(MessageSignatureError::from)
         }
 
         /// Attempt to recover a public key from the signature and the signed message.
@@ -170,9 +173,14 @@ mod message_signing {
         impl MessageSignature {
             /// Convert a signature from base64 encoding.
             pub fn from_base64(s: &str) -> Result<MessageSignature, MessageSignatureError> {
-                let bytes =
-                    BASE64_STANDARD.decode(s).map_err(|_| MessageSignatureError::InvalidBase64)?;
-                MessageSignature::from_slice(&bytes)
+                if s.len() != 88 {
+                    return Err(MessageSignatureError::InvalidLength);
+                }
+                let mut byte_array = [0; 65];
+                BASE64_STANDARD
+                    .decode_slice_unchecked(s, &mut byte_array)
+                    .map_err(|_| MessageSignatureError::InvalidBase64)?;
+                MessageSignature::from_byte_array(&byte_array).map_err(MessageSignatureError::from)
             }
 
             /// Convert to base64 encoding.
@@ -197,12 +205,13 @@ mod message_signing {
 }
 
 /// Hash message for signature using Bitcoin's message signing format.
-pub fn signed_msg_hash(msg: &str) -> sha256d::Hash {
+pub fn signed_msg_hash(msg: impl AsRef<[u8]>) -> sha256d::Hash {
+    let msg_bytes = msg.as_ref();
     let mut engine = sha256d::Hash::engine();
     engine.input(BITCOIN_SIGNED_MSG_PREFIX);
-    let msg_len = encode::VarInt::from(msg.len());
+    let msg_len = encode::VarInt::from(msg_bytes.len());
     msg_len.consensus_encode(&mut engine).expect("engines don't error");
-    engine.input(msg.as_bytes());
+    engine.input(msg_bytes);
     sha256d::Hash::from_engine(engine)
 }
 
@@ -258,6 +267,10 @@ mod tests {
         assert_eq!(signature2.is_signed_by_address(&secp, &p2pkh, msg_hash), Ok(true));
 
         assert_eq!(pubkey.0, secp256k1::PublicKey::from_secret_key(&secp, &privkey));
+        let signature_base64 = signature.to_base64();
+        let signature_round_trip =
+            super::MessageSignature::from_base64(&signature_base64).expect("message signature");
+        assert_eq!(signature, signature_round_trip);
     }
 
     #[test]

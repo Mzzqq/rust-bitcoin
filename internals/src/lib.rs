@@ -10,6 +10,7 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 // Coding conventions.
 #![warn(missing_docs)]
+#![doc(test(attr(warn(unused))))]
 // Exclude lints we don't think are valuable.
 #![allow(clippy::needless_question_mark)] // https://github.com/rust-bitcoin/rust-bitcoin/pull/2134
 #![allow(clippy::manual_range_contains)] // More readable than clippy's format.
@@ -35,10 +36,12 @@ pub mod rust_version {
 }
 
 pub mod array_vec;
+pub mod compact_size;
 pub mod const_tools;
 pub mod error;
 pub mod macros;
 mod parse;
+pub mod script;
 #[cfg(feature = "serde")]
 #[macro_use]
 pub mod serde;
@@ -63,7 +66,10 @@ impl_to_u64!(u8, u16, u32, u64);
 
 impl ToU64 for usize {
     fn to_u64(self) -> u64 {
-        crate::const_assert!(core::mem::size_of::<usize>() <= 8);
+        crate::const_assert!(
+            core::mem::size_of::<usize>() <= 8;
+            "platforms that have usize larger than 64 bits are not supported"
+        );
         self as u64
     }
 }

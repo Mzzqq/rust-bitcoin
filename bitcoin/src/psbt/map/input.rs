@@ -131,10 +131,12 @@ pub struct Input {
     pub unknown: BTreeMap<raw::Key, Vec<u8>>,
 }
 
-/// A Signature hash type for the corresponding input. As of Taproot upgrade, the signature hash
-/// type can be either [`EcdsaSighashType`] or [`TapSighashType`] but it is not possible to know
-/// directly which signature hash type the user is dealing with. Therefore, the user is responsible
-/// for converting to/from [`PsbtSighashType`] from/to the desired signature hash type they need.
+/// A Signature hash type for the corresponding input.
+///
+/// As of Taproot upgrade, the signature hash type can be either [`EcdsaSighashType`] or
+/// [`TapSighashType`] but it is not possible to know directly which signature hash type the user is
+/// dealing with. Therefore, the user is responsible for converting to/from [`PsbtSighashType`]
+/// from/to the desired signature hash type they need.
 ///
 /// # Examples
 ///
@@ -142,8 +144,8 @@ pub struct Input {
 /// use bitcoin::{EcdsaSighashType, TapSighashType};
 /// use bitcoin::psbt::PsbtSighashType;
 ///
-/// let ecdsa_sighash_all: PsbtSighashType = EcdsaSighashType::All.into();
-/// let tap_sighash_all: PsbtSighashType = TapSighashType::All.into();
+/// let _ecdsa_sighash_all: PsbtSighashType = EcdsaSighashType::All.into();
+/// let _tap_sighash_all: PsbtSighashType = TapSighashType::All.into();
 /// ```
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -206,8 +208,8 @@ impl PsbtSighashType {
     /// ```
     /// use bitcoin::{EcdsaSighashType, TapSighashType};
     /// use bitcoin::psbt::PsbtSighashType;
-    /// let ecdsa_sighash_anyone_can_pay: PsbtSighashType = EcdsaSighashType::AllPlusAnyoneCanPay.into();
-    /// let tap_sighash_anyone_can_pay: PsbtSighashType = TapSighashType::AllPlusAnyoneCanPay.into();
+    /// let _ecdsa_sighash_anyone_can_pay: PsbtSighashType = EcdsaSighashType::AllPlusAnyoneCanPay.into();
+    /// let _tap_sighash_anyone_can_pay: PsbtSighashType = TapSighashType::AllPlusAnyoneCanPay.into();
     /// ```
     pub const ALL: PsbtSighashType = PsbtSighashType { inner: 0x01 };
 

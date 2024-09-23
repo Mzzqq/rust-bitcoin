@@ -12,8 +12,10 @@
 #![cfg_attr(bench, feature(test))]
 // Coding conventions.
 #![warn(missing_docs)]
-// Instead of littering the codebase for non-fuzzing code just globally allow.
+#![doc(test(attr(warn(unused))))]
+// Instead of littering the codebase for non-fuzzing and bench code just globally allow.
 #![cfg_attr(fuzzing, allow(dead_code, unused_imports))]
+#![cfg_attr(bench, allow(dead_code, unused_imports))]
 // Exclude lints we don't think are valuable.
 #![allow(clippy::needless_question_mark)] // https://github.com/rust-bitcoin/rust-bitcoin/pull/2134
 #![allow(clippy::manual_range_contains)] // More readable than clippy's format.
@@ -248,6 +250,7 @@ where
 #[cfg(test)]
 mod tests {
     use alloc::vec;
+
     use hex::test_hex_unwrap as hex;
 
     use super::*;

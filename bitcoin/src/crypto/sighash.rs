@@ -1127,7 +1127,8 @@ impl<R: BorrowMut<Transaction>> SighashCache<R> {
     ///
     /// # Examples
     ///
-    /// ```compile_fail
+    /// ```ignore
+    /// # // Example is an incomplete section of code that does not compile by itself
     /// let mut sighasher = SighashCache::new(&mut tx_to_sign);
     /// let sighash = sighasher.p2wpkh_signature_hash(input_index, &utxo.script_pubkey, amount, sighash_type)?;
     ///
@@ -1370,8 +1371,8 @@ impl<E> EncodeSigningDataResult<E> {
     ///
     /// ```rust
     /// # use bitcoin::consensus::deserialize;
-    /// # use bitcoin::hashes::{sha256d, Hash, hex::FromHex};
-    /// # use bitcoin::sighash::{LegacySighash, SighashCache};
+    /// # use bitcoin::hashes::{sha256d, hex::FromHex};
+    /// # use bitcoin::sighash::SighashCache;
     /// # use bitcoin::Transaction;
     /// # let mut writer = sha256d::Hash::engine();
     /// # let input_index = 0;

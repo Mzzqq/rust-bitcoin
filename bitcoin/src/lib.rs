@@ -30,14 +30,14 @@
 #![cfg_attr(bench, feature(test))]
 // Coding conventions.
 #![warn(missing_docs)]
-// Instead of littering the codebase for non-fuzzing code just globally allow.
+#![doc(test(attr(warn(unused))))]
+// Instead of littering the codebase for non-fuzzing and bench code just globally allow.
 #![cfg_attr(fuzzing, allow(dead_code, unused_imports))]
+#![cfg_attr(bench, allow(dead_code, unused_imports))]
 // Exclude lints we don't think are valuable.
 #![allow(clippy::needless_question_mark)] // https://github.com/rust-bitcoin/rust-bitcoin/pull/2134
 #![allow(clippy::manual_range_contains)] // More readable than clippy's format.
 #![allow(clippy::needless_borrows_for_generic_args)] // https://github.com/rust-lang/rust-clippy/issues/12454
-
-use core::mem;
 
 // We only support machines with index size of 4 bytes or more.
 //
@@ -49,7 +49,10 @@ use core::mem;
 // does not equal index size.
 //
 // ref: https://github.com/rust-bitcoin/rust-bitcoin/pull/2929#discussion_r1661848565
-internals::const_assert!(mem::size_of::<usize>() >= 4);
+internals::const_assert!(
+    core::mem::size_of::<usize>() >= 4;
+    "platforms that have usize less than 32 bits are not supported"
+);
 
 #[cfg(bench)]
 extern crate test;
