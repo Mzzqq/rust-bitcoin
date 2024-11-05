@@ -19,7 +19,7 @@ pub struct TaprootMerkleBranch(Vec<TapNodeHash>);
 
 impl TaprootMerkleBranch {
     /// Returns a reference to the slice of hashes.
-    #[deprecated(since = "0.32.0", note = "Use `as_slice` instead")]
+    #[deprecated(since = "0.32.0", note = "use `as_slice` instead")]
     #[inline]
     pub fn as_inner(&self) -> &[TapNodeHash] { &self.0 }
 
@@ -53,8 +53,9 @@ impl TaprootMerkleBranch {
             let inner = sl
                 .chunks_exact(TAPROOT_CONTROL_NODE_SIZE)
                 .map(|chunk| {
-                    TapNodeHash::from_slice(chunk)
-                        .expect("chunks_exact always returns the correct size")
+                    let bytes = <[u8; 32]>::try_from(chunk)
+                        .expect("chunks_exact always returns the correct size");
+                    TapNodeHash::from_byte_array(bytes)
                 })
                 .collect();
 
@@ -106,7 +107,7 @@ impl TaprootMerkleBranch {
     }
 
     /// Returns the inner list of hashes.
-    #[deprecated(since = "0.32.0", note = "Use `into_vec` instead")]
+    #[deprecated(since = "0.32.0", note = "use `into_vec` instead")]
     #[inline]
     pub fn into_inner(self) -> Vec<TapNodeHash> { self.0 }
 

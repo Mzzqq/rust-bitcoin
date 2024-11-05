@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: CC0-1.0
 
 use hex_lit::hex;
+use primitives::opcodes;
 
 use super::*;
 use crate::address::script_pubkey::{
@@ -18,18 +19,18 @@ fn script() {
     assert_eq!(script.as_bytes(), &comp[..]);
 
     // small ints
-    script = script.push_int(1);  comp.push(81u8); assert_eq!(script.as_bytes(), &comp[..]);
-    script = script.push_int(0);  comp.push(0u8);  assert_eq!(script.as_bytes(), &comp[..]);
-    script = script.push_int(4);  comp.push(84u8); assert_eq!(script.as_bytes(), &comp[..]);
-    script = script.push_int(-1); comp.push(79u8); assert_eq!(script.as_bytes(), &comp[..]);
+    script = script.push_int_unchecked(1);  comp.push(81u8); assert_eq!(script.as_bytes(), &comp[..]);
+    script = script.push_int_unchecked(0);  comp.push(0u8);  assert_eq!(script.as_bytes(), &comp[..]);
+    script = script.push_int_unchecked(4);  comp.push(84u8); assert_eq!(script.as_bytes(), &comp[..]);
+    script = script.push_int_unchecked(-1); comp.push(79u8); assert_eq!(script.as_bytes(), &comp[..]);
     // forced scriptint
     script = script.push_int_non_minimal(4); comp.extend([1u8, 4].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
     // big ints
-    script = script.push_int(17); comp.extend([1u8, 17].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
-    script = script.push_int(10000); comp.extend([2u8, 16, 39].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
+    script = script.push_int_unchecked(17); comp.extend([1u8, 17].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
+    script = script.push_int_unchecked(10000); comp.extend([2u8, 16, 39].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
     // notice the sign bit set here, hence the extra zero/128 at the end
-    script = script.push_int(10000000); comp.extend([4u8, 128, 150, 152, 0].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
-    script = script.push_int(-10000000); comp.extend([4u8, 128, 150, 152, 128].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
+    script = script.push_int_unchecked(10000000); comp.extend([4u8, 128, 150, 152, 0].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
+    script = script.push_int_unchecked(-10000000); comp.extend([4u8, 128, 150, 152, 128].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
 
     // data
     script = script.push_slice(b"NRA4VR"); comp.extend([6u8, 78, 82, 65, 52, 86, 82].iter().cloned()); assert_eq!(script.as_bytes(), &comp[..]);
@@ -53,7 +54,7 @@ fn p2pk_pubkey_bytes_valid_key_and_valid_script_returns_expected_key() {
     let key = key_str.parse::<PublicKey>().unwrap();
     let p2pk = Script::builder().push_key(key).push_opcode(OP_CHECKSIG).into_script();
     let actual = p2pk.p2pk_pubkey_bytes().unwrap();
-    assert_eq!(actual.to_vec(), key.to_bytes());
+    assert_eq!(actual.to_vec(), key.to_vec());
 }
 
 #[test]
@@ -108,7 +109,7 @@ fn p2pk_pubkey_bytes_compressed_key_returns_expected_key() {
     let key = compressed_key_str.parse::<PublicKey>().unwrap();
     let p2pk = Script::builder().push_key(key).push_opcode(OP_CHECKSIG).into_script();
     let actual = p2pk.p2pk_pubkey_bytes().unwrap();
-    assert_eq!(actual.to_vec(), key.to_bytes());
+    assert_eq!(actual.to_vec(), key.to_vec());
 }
 
 #[test]
@@ -652,8 +653,8 @@ fn test_iterator() {
 #[test]
 fn script_ord() {
     let script_1 = Builder::new().push_slice([1, 2, 3, 4]).into_script();
-    let script_2 = Builder::new().push_int(10).into_script();
-    let script_3 = Builder::new().push_int(15).into_script();
+    let script_2 = Builder::new().push_int_unchecked(10).into_script();
+    let script_3 = Builder::new().push_int_unchecked(15).into_script();
     let script_4 = Builder::new().push_opcode(OP_RETURN).into_script();
 
     assert!(script_1 < script_2);
@@ -684,7 +685,7 @@ fn test_bitcoinconsensus() {
 fn defult_dust_value_tests() {
     // Check that our dust_value() calculator correctly calculates the dust limit on common
     // well-known scriptPubKey types.
-    let script_p2wpkh = Builder::new().push_int(0).push_slice([42; 20]).into_script();
+    let script_p2wpkh = Builder::new().push_int_unchecked(0).push_slice([42; 20]).into_script();
     assert!(script_p2wpkh.is_p2wpkh());
     assert_eq!(script_p2wpkh.minimal_non_dust(), crate::Amount::from_sat(294));
     assert_eq!(
@@ -915,4 +916,10 @@ fn instruction_script_num_parse() {
         Script::from_bytes(&[0x00]).instructions().next(),
         Some(Ok(Instruction::PushBytes(PushBytes::empty()))),
     );
+}
+
+#[test]
+fn script_push_int_overflow() {
+    // Only errors if `data == i32::MIN` (CScriptNum cannot have value -2^31).
+    assert_eq!(Builder::new().push_int(i32::MIN), Err(Error::NumericOverflow));
 }

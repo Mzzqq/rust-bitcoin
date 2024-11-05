@@ -17,7 +17,6 @@
 // Exclude lints we don't think are valuable.
 #![allow(clippy::needless_question_mark)] // https://github.com/rust-bitcoin/rust-bitcoin/pull/2134
 #![allow(clippy::manual_range_contains)] // More readable than clippy's format.
-#![allow(clippy::needless_borrows_for_generic_args)] // https://github.com/rust-lang/rust-clippy/issues/12454
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -98,7 +97,7 @@ pub struct Take<'a, R: Read + ?Sized> {
     remaining: u64,
 }
 
-impl<'a, R: Read + ?Sized> Take<'a, R> {
+impl<R: Read + ?Sized> Take<'_, R> {
     /// Reads all bytes until EOF from the underlying reader into `buf`.
     #[cfg(feature = "alloc")]
     #[inline]
@@ -120,7 +119,7 @@ impl<'a, R: Read + ?Sized> Take<'a, R> {
     }
 }
 
-impl<'a, R: Read + ?Sized> Read for Take<'a, R> {
+impl<R: Read + ?Sized> Read for Take<'_, R> {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         let len = cmp::min(buf.len(), self.remaining.try_into().unwrap_or(buf.len()));
@@ -131,7 +130,7 @@ impl<'a, R: Read + ?Sized> Read for Take<'a, R> {
 }
 
 // Impl copied from Rust stdlib.
-impl<'a, R: BufRead + ?Sized> BufRead for Take<'a, R> {
+impl<R: BufRead + ?Sized> BufRead for Take<'_, R> {
     #[inline]
     fn fill_buf(&mut self) -> Result<&[u8]> {
         // Don't call into inner reader at all at EOF because it may still block
@@ -299,7 +298,7 @@ impl Write for alloc::vec::Vec<u8> {
     fn flush(&mut self) -> Result<()> { Ok(()) }
 }
 
-impl<'a> Write for &'a mut [u8] {
+impl Write for &mut [u8] {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         let cnt = core::cmp::min(self.len(), buf.len());

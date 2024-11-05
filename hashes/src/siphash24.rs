@@ -2,8 +2,6 @@
 
 //! SipHash 2-4 implementation.
 
-use core::ops::Index;
-use core::slice::SliceIndex;
 use core::{cmp, mem};
 
 use crate::HashEngine as _;
@@ -79,10 +77,10 @@ pub struct State {
 pub struct HashEngine {
     k0: u64,
     k1: u64,
-    length: usize, // how many bytes we've processed
-    state: State,  // hash State
-    tail: u64,     // unprocessed bytes le
-    ntail: usize,  // how many bytes in tail are valid
+    bytes_hashed: u64, // how many bytes we've processed
+    state: State,      // hash State
+    tail: u64,         // unprocessed bytes le
+    ntail: usize,      // how many bytes in tail are valid
 }
 
 impl HashEngine {
@@ -92,7 +90,7 @@ impl HashEngine {
         HashEngine {
             k0,
             k1,
-            length: 0,
+            bytes_hashed: 0,
             state: State {
                 v0: k0 ^ 0x736f6d6570736575,
                 v1: k1 ^ 0x646f72616e646f6d,
@@ -127,16 +125,17 @@ impl crate::HashEngine for HashEngine {
 
     #[inline]
     fn input(&mut self, msg: &[u8]) {
-        let length = msg.len();
-        self.length += length;
+        let bytes_hashed = msg.len();
+        self.bytes_hashed += bytes_hashed as u64; // Cast usize to u64 is ok.
 
         let mut needed = 0;
 
         if self.ntail != 0 {
             needed = 8 - self.ntail;
-            self.tail |= unsafe { u8to64_le(msg, 0, cmp::min(length, needed)) } << (8 * self.ntail);
-            if length < needed {
-                self.ntail += length;
+            self.tail |=
+                unsafe { u8to64_le(msg, 0, cmp::min(bytes_hashed, needed)) } << (8 * self.ntail);
+            if bytes_hashed < needed {
+                self.ntail += bytes_hashed;
                 return;
             } else {
                 self.state.v3 ^= self.tail;
@@ -147,7 +146,7 @@ impl crate::HashEngine for HashEngine {
         }
 
         // Buffered tail is now flushed, process new input.
-        let len = length - needed;
+        let len = bytes_hashed - needed;
         let left = len & 0x7;
 
         let mut i = needed;
@@ -165,10 +164,13 @@ impl crate::HashEngine for HashEngine {
         self.ntail = left;
     }
 
-    fn n_bytes_hashed(&self) -> usize { self.length }
+    fn n_bytes_hashed(&self) -> u64 { self.bytes_hashed }
 }
 
 impl Hash {
+    /// Produces a hash from the current state of a given engine.
+    pub fn from_engine(e: HashEngine) -> Hash { from_engine(e) }
+
     /// Hashes the given data with an engine with the provided keys.
     pub fn hash_with_keys(k0: u64, k1: u64, data: &[u8]) -> Hash {
         let mut engine = HashEngine::with_keys(k0, k1);
@@ -188,7 +190,7 @@ impl Hash {
     pub fn from_engine_to_u64(e: HashEngine) -> u64 {
         let mut state = e.state;
 
-        let b: u64 = ((e.length as u64 & 0xff) << 56) | e.tail;
+        let b: u64 = ((e.bytes_hashed & 0xff) << 56) | e.tail;
 
         state.v3 ^= b;
         HashEngine::c_rounds(&mut state);
@@ -201,7 +203,7 @@ impl Hash {
     }
 
     /// Returns the (little endian) 64-bit integer representation of the hash value.
-    #[deprecated(since = "TBD", note = "use `to_u64` instead")]
+    #[deprecated(since = "0.15.0", note = "use `to_u64` instead")]
     pub fn as_u64(&self) -> u64 { self.to_u64() }
 
     /// Returns the (little endian) 64-bit integer representation of the hash value.

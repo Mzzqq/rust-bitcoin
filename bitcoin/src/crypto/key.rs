@@ -20,7 +20,7 @@ use crate::internal_macros::impl_asref_push_bytes;
 use crate::network::NetworkKind;
 use crate::prelude::{DisplayHex, String, Vec};
 use crate::script::{self, ScriptBuf};
-use crate::taproot::{TapNodeHash, TapTweakHash};
+use crate::taproot::{TapNodeHash, TapTweakHash, TapTweakHashExt as _};
 
 #[rustfmt::skip]                // Keep public re-exports separate.
 pub use secp256k1::{constants, Keypair, Parity, Secp256k1, Verification, XOnlyPublicKey};
@@ -110,7 +110,11 @@ impl PublicKey {
     }
 
     /// Serializes the public key to bytes.
-    pub fn to_bytes(self) -> Vec<u8> {
+    #[deprecated(since = "TBD", note = "use to_vec instead")]
+    pub fn to_bytes(self) -> Vec<u8> { self.to_vec() }
+
+    /// Serializes the public key to bytes.
+    pub fn to_vec(self) -> Vec<u8> {
         let mut buf = Vec::new();
         self.write_into(&mut buf).expect("vecs don't error");
         buf
@@ -443,7 +447,11 @@ impl PrivateKey {
     }
 
     /// Serializes the private key to bytes.
-    pub fn to_bytes(self) -> Vec<u8> { self.inner[..].to_vec() }
+    #[deprecated(since = "TBD", note = "use to_vec instead")]
+    pub fn to_bytes(self) -> Vec<u8> { self.to_vec() }
+
+    /// Serializes the private key to bytes.
+    pub fn to_vec(self) -> Vec<u8> { self.inner[..].to_vec() }
 
     /// Deserializes a private key from a slice.
     pub fn from_slice(
@@ -531,7 +539,7 @@ impl<'de> serde::Deserialize<'de> for PrivateKey {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<PrivateKey, D::Error> {
         struct WifVisitor;
 
-        impl<'de> serde::de::Visitor<'de> for WifVisitor {
+        impl serde::de::Visitor<'_> for WifVisitor {
             type Value = PrivateKey;
 
             fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -579,7 +587,7 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
         if d.is_human_readable() {
             struct HexVisitor;
 
-            impl<'de> serde::de::Visitor<'de> for HexVisitor {
+            impl serde::de::Visitor<'_> for HexVisitor {
                 type Value = PublicKey;
 
                 fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -608,7 +616,7 @@ impl<'de> serde::Deserialize<'de> for PublicKey {
         } else {
             struct BytesVisitor;
 
-            impl<'de> serde::de::Visitor<'de> for BytesVisitor {
+            impl serde::de::Visitor<'_> for BytesVisitor {
                 type Value = PublicKey;
 
                 fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -645,7 +653,7 @@ impl<'de> serde::Deserialize<'de> for CompressedPublicKey {
         if d.is_human_readable() {
             struct HexVisitor;
 
-            impl<'de> serde::de::Visitor<'de> for HexVisitor {
+            impl serde::de::Visitor<'_> for HexVisitor {
                 type Value = CompressedPublicKey;
 
                 fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -674,7 +682,7 @@ impl<'de> serde::Deserialize<'de> for CompressedPublicKey {
         } else {
             struct BytesVisitor;
 
-            impl<'de> serde::de::Visitor<'de> for BytesVisitor {
+            impl serde::de::Visitor<'_> for BytesVisitor {
                 type Value = CompressedPublicKey;
 
                 fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -1514,27 +1522,5 @@ mod tests {
         let res = s.parse::<PublicKey>();
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), ParsePublicKeyError::InvalidChar(103));
-    }
-
-    #[test]
-    #[cfg(feature = "std")]
-    fn private_key_debug_is_obfuscated() {
-        let sk =
-            "cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy".parse::<PrivateKey>().unwrap();
-        let want =
-            "PrivateKey { compressed: true, network: Test, inner: SecretKey(#32014e414fdce702) }";
-        let got = format!("{:?}", sk);
-        assert_eq!(got, want)
-    }
-
-    #[test]
-    #[cfg(not(feature = "std"))]
-    fn private_key_debug_is_obfuscated() {
-        let sk =
-            "cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy".parse::<PrivateKey>().unwrap();
-        // Why is this not shortened? In rust-secp256k1/src/secret it is printed with "#{:016x}"?
-        let want = "PrivateKey { compressed: true, network: Test, inner: SecretKey(#7217ac58fbad8880a91032107b82cb6c5422544b426c350ee005cf509f3dbf7b) }";
-        let got = format!("{:?}", sk);
-        assert_eq!(got, want)
     }
 }

@@ -12,6 +12,7 @@
 #![cfg_attr(bench, feature(test))]
 // Coding conventions.
 #![warn(missing_docs)]
+#![warn(deprecated_in_future)]
 #![doc(test(attr(warn(unused))))]
 // Instead of littering the codebase for non-fuzzing and bench code just globally allow.
 #![cfg_attr(fuzzing, allow(dead_code, unused_imports))]
@@ -75,12 +76,12 @@ pub fn decode(data: &str) -> Result<Vec<u8>, InvalidCharacterError> {
     for d58 in data.bytes() {
         // Compute "X = X * 58 + next_digit" in base 256
         if usize::from(d58) >= BASE58_DIGITS.len() {
-            return Err(InvalidCharacterError { invalid: d58 });
+            return Err(InvalidCharacterError::new(d58));
         }
         let mut carry = match BASE58_DIGITS[usize::from(d58)] {
             Some(d58) => u32::from(d58),
             None => {
-                return Err(InvalidCharacterError { invalid: d58 });
+                return Err(InvalidCharacterError::new(d58));
             }
         };
         if scratch.is_empty() {
@@ -113,8 +114,9 @@ pub fn decode_check(data: &str) -> Result<Vec<u8>, Error> {
     }
     let check_start = ret.len() - 4;
 
-    let hash_check =
-        sha256d::Hash::hash(&ret[..check_start])[..4].try_into().expect("4 byte slice");
+    let hash_check = sha256d::Hash::hash(&ret[..check_start]).as_byte_array()[..4]
+        .try_into()
+        .expect("4 byte slice");
     let data_check = ret[check_start..].try_into().expect("4 byte slice");
 
     let expected = u32::from_le_bytes(hash_check);
@@ -165,7 +167,7 @@ pub fn encode_check_to_fmt(fmt: &mut fmt::Formatter, data: &[u8]) -> fmt::Result
 
 fn encode_check_to_writer(fmt: &mut impl fmt::Write, data: &[u8]) -> fmt::Result {
     let checksum = sha256d::Hash::hash(data);
-    let iter = data.iter().cloned().chain(checksum[0..4].iter().cloned());
+    let iter = data.iter().cloned().chain(checksum.as_byte_array()[0..4].iter().cloned());
     let reserve_len = encoded_check_reserve_len(data.len());
     if reserve_len <= SHORT_OPT_BUFFER_LEN {
         format_iter(fmt, iter, &mut ArrayVec::<u8, SHORT_OPT_BUFFER_LEN>::new())
@@ -302,7 +304,7 @@ mod tests {
             Some(hex!("00f8917303bfa8ef24f292e8fa1419b20460ba064d"))
         );
         // Non Base58 char.
-        assert_eq!(decode("¢").unwrap_err(), InvalidCharacterError { invalid: 194 });
+        assert_eq!(decode("¢").unwrap_err(), InvalidCharacterError::new(194));
     }
 
     #[test]

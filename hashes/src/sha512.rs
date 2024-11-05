@@ -3,12 +3,10 @@
 //! SHA512 implementation.
 
 use core::cmp;
-use core::ops::Index;
-use core::slice::SliceIndex;
 
-use crate::HashEngine as _;
+use crate::{incomplete_block_len, HashEngine as _};
 
-crate::internal_macros::hash_type! {
+crate::internal_macros::general_hash_type! {
     512,
     false,
     "Output of the SHA512 hash function."
@@ -17,20 +15,20 @@ crate::internal_macros::hash_type! {
 #[cfg(not(hashes_fuzz))]
 pub(crate) fn from_engine(mut e: HashEngine) -> Hash {
     // pad buffer with a single 1-bit then all 0s, until there are exactly 16 bytes remaining
-    let data_len = e.length as u64;
+    let n_bytes_hashed = e.bytes_hashed;
 
     let zeroes = [0; BLOCK_SIZE - 16];
     e.input(&[0x80]);
-    if e.length % BLOCK_SIZE > zeroes.len() {
+    if incomplete_block_len(&e) > zeroes.len() {
         e.input(&zeroes);
     }
-    let pad_length = zeroes.len() - (e.length % BLOCK_SIZE);
+    let pad_length = zeroes.len() - incomplete_block_len(&e);
     e.input(&zeroes[..pad_length]);
-    debug_assert_eq!(e.length % BLOCK_SIZE, zeroes.len());
+    debug_assert_eq!(incomplete_block_len(&e), zeroes.len());
 
     e.input(&[0; 8]);
-    e.input(&(8 * data_len).to_be_bytes());
-    debug_assert_eq!(e.length % BLOCK_SIZE, 0);
+    e.input(&(8 * n_bytes_hashed).to_be_bytes());
+    debug_assert_eq!(incomplete_block_len(&e), 0);
 
     Hash(e.midstate())
 }
@@ -48,7 +46,7 @@ pub(crate) const BLOCK_SIZE: usize = 128;
 #[derive(Clone)]
 pub struct HashEngine {
     h: [u64; 8],
-    length: usize,
+    bytes_hashed: u64,
     buffer: [u8; BLOCK_SIZE],
 }
 
@@ -61,7 +59,7 @@ impl HashEngine {
                 0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
                 0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179,
             ],
-            length: 0,
+            bytes_hashed: 0,
             buffer: [0; BLOCK_SIZE],
         }
     }
@@ -96,7 +94,7 @@ impl HashEngine {
                 0x22312194fc2bf72c, 0x9f555fa3c84c64c2, 0x2393b86b6f53b151, 0x963877195940eabd,
                 0x96283ee2a88effe3, 0xbe5e1e2553863992, 0x2b0199fc2c85b8aa, 0x0eb72ddc81c52ca2,
             ],
-            length: 0,
+            bytes_hashed: 0,
             buffer: [0; BLOCK_SIZE],
         }
     }
@@ -109,7 +107,7 @@ impl HashEngine {
                 0xcbbb9d5dc1059ed8, 0x629a292a367cd507, 0x9159015a3070dd17, 0x152fecd8f70e5939,
                 0x67332667ffc00b31, 0x8eb44a8768581511, 0xdb0c2e0d64f98fa7, 0x47b5481dbefa4fa4,
             ],
-            length: 0,
+            bytes_hashed: 0,
             buffer: [0; BLOCK_SIZE],
         }
     }
@@ -118,9 +116,9 @@ impl HashEngine {
 impl crate::HashEngine for HashEngine {
     const BLOCK_SIZE: usize = 128;
 
-    fn n_bytes_hashed(&self) -> usize { self.length }
+    fn n_bytes_hashed(&self) -> u64 { self.bytes_hashed }
 
-    engine_input_impl!();
+    crate::internal_macros::engine_input_impl!();
 }
 
 #[allow(non_snake_case)]
@@ -372,7 +370,7 @@ mod tests {
             // Hash through high-level API, check hex encoding/decoding
             let hash = sha512::Hash::hash(test.input.as_bytes());
             assert_eq!(hash, test.output_str.parse::<sha512::Hash>().expect("parse hex"));
-            assert_eq!(hash[..], test.output);
+            assert_eq!(hash.as_byte_array(), &test.output);
             assert_eq!(hash.to_string(), test.output_str);
 
             // Hash through engine, checking that we can input byte by byte

@@ -16,7 +16,7 @@ use io::{BufRead, Write};
 
 use self::MerkleBlockError::*;
 use crate::block::{self, Block};
-use crate::consensus::encode::{self, Decodable, Encodable, MAX_VEC_SIZE};
+use crate::consensus::encode::{self, Decodable, Encodable, ReadExt, WriteExt, MAX_VEC_SIZE};
 use crate::merkle_tree::{MerkleNode as _, TxMerkleNode};
 use crate::prelude::Vec;
 use crate::transaction::{Transaction, Txid};
@@ -405,7 +405,7 @@ impl Encodable for PartialMerkleTree {
         ret += self.hashes.consensus_encode(w)?;
 
         let nb_bytes_for_bits = (self.bits.len() + 7) / 8;
-        ret += encode::VarInt::from(nb_bytes_for_bits).consensus_encode(w)?;
+        ret += w.emit_compact_size(nb_bytes_for_bits)?;
         for chunk in self.bits.chunks(8) {
             let mut byte = 0u8;
             for (i, bit) in chunk.iter().enumerate() {
@@ -424,12 +424,13 @@ impl Decodable for PartialMerkleTree {
         let num_transactions: u32 = Decodable::consensus_decode(r)?;
         let hashes: Vec<TxMerkleNode> = Decodable::consensus_decode(r)?;
 
-        let nb_bytes_for_bits = encode::VarInt::consensus_decode(r)?.0 as usize;
+        let nb_bytes_for_bits = r.read_compact_size()? as usize;
         if nb_bytes_for_bits > MAX_VEC_SIZE {
-            return Err(encode::Error::OversizedVectorAllocation {
+            return Err(encode::ParseError::OversizedVectorAllocation {
                 requested: nb_bytes_for_bits,
                 max: MAX_VEC_SIZE,
-            });
+            }
+            .into());
         }
         let mut bits = vec![false; nb_bytes_for_bits * 8];
         for chunk in bits.chunks_mut(8) {
@@ -724,7 +725,7 @@ mod tests {
             let hashes = &mut self.hashes;
             let mut hash = hashes[n].to_byte_array();
             hash[(bit >> 3) as usize] ^= 1 << (bit & 7);
-            hashes[n] = TxMerkleNode::from_slice(&hash).unwrap();
+            hashes[n] = TxMerkleNode::from_byte_array(hash);
         }
     }
 

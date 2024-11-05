@@ -13,6 +13,8 @@
 
 use core::{fmt, str};
 
+#[cfg(feature = "arbitrary")]
+use arbitrary::{Arbitrary, Unstructured};
 use hashes::{hash_newtype, sha256, sha256d, sha256t, sha256t_tag};
 use internals::write_err;
 use io::Write;
@@ -21,6 +23,7 @@ use crate::address::script_pubkey::ScriptExt as _;
 use crate::consensus::{encode, Encodable};
 use crate::prelude::{Borrow, BorrowMut, String, ToOwned, Vec};
 use crate::taproot::{LeafVersion, TapLeafHash, TapLeafTag, TAPROOT_ANNEX_PREFIX};
+use crate::transaction::TransactionExt as _;
 use crate::witness::Witness;
 use crate::{transaction, Amount, Script, ScriptBuf, Sequence, Transaction, TxIn, TxOut};
 
@@ -213,7 +216,7 @@ impl str::FromStr for TapSighashType {
     }
 }
 
-impl<'u, T> Prevouts<'u, T>
+impl<T> Prevouts<'_, T>
 where
     T: Borrow<TxOut>,
 {
@@ -1168,7 +1171,7 @@ impl<'a> Annex<'a> {
     pub fn as_bytes(&self) -> &[u8] { self.0 }
 }
 
-impl<'a> Encodable for Annex<'a> {
+impl Encodable for Annex<'_> {
     fn consensus_encode<W: Write + ?Sized>(&self, w: &mut W) -> Result<usize, io::Error> {
         encode::consensus_encode_with_size(self.0, w)
     }
@@ -1467,6 +1470,37 @@ impl<E: std::error::Error + 'static> std::error::Error for SigningDataError<E> {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for EcdsaSighashType {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice = u.int_in_range(0..=5)?;
+        match choice {
+            0 => Ok(EcdsaSighashType::All),
+            1 => Ok(EcdsaSighashType::None),
+            2 => Ok(EcdsaSighashType::Single),
+            3 => Ok(EcdsaSighashType::AllPlusAnyoneCanPay),
+            4 => Ok(EcdsaSighashType::NonePlusAnyoneCanPay),
+            _ => Ok(EcdsaSighashType::SinglePlusAnyoneCanPay),
+        }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for TapSighashType {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let choice = u.int_in_range(0..=6)?;
+        match choice {
+            0 => Ok(TapSighashType::Default),
+            1 => Ok(TapSighashType::All),
+            2 => Ok(TapSighashType::None),
+            3 => Ok(TapSighashType::Single),
+            4 => Ok(TapSighashType::AllPlusAnyoneCanPay),
+            5 => Ok(TapSighashType::NonePlusAnyoneCanPay),
+            _ => Ok(TapSighashType::SinglePlusAnyoneCanPay),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hashes::HashEngine;
@@ -1487,14 +1521,14 @@ mod tests {
         let tx = Transaction {
             version: transaction::Version::ONE,
             lock_time: absolute::LockTime::ZERO,
-            input: vec![TxIn::default(), TxIn::default()],
+            input: vec![TxIn::EMPTY_COINBASE, TxIn::EMPTY_COINBASE],
             output: vec![TxOut::NULL],
         };
         let script = ScriptBuf::new();
         let cache = SighashCache::new(&tx);
 
         let got = cache.legacy_signature_hash(1, &script, SIGHASH_SINGLE).expect("sighash");
-        let want = LegacySighash::from_slice(&UINT256_ONE).unwrap();
+        let want = LegacySighash::from_byte_array(UINT256_ONE);
 
         assert_eq!(got, want)
     }
@@ -1517,7 +1551,8 @@ mod tests {
             let script = ScriptBuf::from(Vec::from_hex(script).unwrap());
             let mut raw_expected = Vec::from_hex(expected_result).unwrap();
             raw_expected.reverse();
-            let want = LegacySighash::from_slice(&raw_expected[..]).unwrap();
+            let bytes = <[u8; 32]>::try_from(&raw_expected[..]).unwrap();
+            let want = LegacySighash::from_byte_array(bytes);
 
             let cache = SighashCache::new(&tx);
             let got = cache.legacy_signature_hash(input_index, &script, hash_type as u32).unwrap();
@@ -1676,7 +1711,7 @@ mod tests {
         let dumb_tx = Transaction {
             version: transaction::Version::TWO,
             lock_time: absolute::LockTime::ZERO,
-            input: vec![TxIn::default()],
+            input: vec![TxIn::EMPTY_COINBASE],
             output: vec![],
         };
         let mut c = SighashCache::new(&dumb_tx);
@@ -1791,6 +1826,8 @@ mod tests {
     #[test]
     fn bip_341_sighash_tests() {
         use hex::DisplayHex;
+
+        use crate::taproot::TapTweakHashExt as _;
 
         fn sighash_deser_numeric<'de, D>(deserializer: D) -> Result<TapSighashType, D::Error>
         where

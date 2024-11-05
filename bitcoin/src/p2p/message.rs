@@ -11,7 +11,7 @@ use hashes::sha256d;
 use internals::ToU64 as _;
 use io::{BufRead, Write};
 
-use crate::consensus::encode::{self, CheckedData, Decodable, Encodable, VarInt};
+use crate::consensus::encode::{self, CheckedData, Decodable, Encodable, ReadExt, WriteExt};
 use crate::merkle_tree::MerkleBlock;
 use crate::p2p::address::{AddrV2Message, Address};
 use crate::p2p::{
@@ -19,7 +19,7 @@ use crate::p2p::{
     Magic,
 };
 use crate::prelude::{Box, Cow, String, ToOwned, Vec};
-use crate::{block, transaction};
+use crate::{block, consensus, transaction};
 
 /// The maximum number of [super::message_blockdata::Inventory] items in an `inv` message.
 ///
@@ -307,6 +307,7 @@ impl RawNetworkMessage {
         let payload_len = payload.consensus_encode(&mut engine).expect("engine doesn't error");
         let payload_len = u32::try_from(payload_len).expect("network message use u32 as length");
         let checksum = sha256d::Hash::from_engine(engine);
+        let checksum = checksum.to_byte_array();
         let checksum = [checksum[0], checksum[1], checksum[2], checksum[3]];
         Self { magic, payload, payload_len, checksum }
     }
@@ -333,11 +334,11 @@ impl RawNetworkMessage {
 
 struct HeaderSerializationWrapper<'a>(&'a Vec<block::Header>);
 
-impl<'a> Encodable for HeaderSerializationWrapper<'a> {
+impl Encodable for HeaderSerializationWrapper<'_> {
     #[inline]
     fn consensus_encode<W: Write + ?Sized>(&self, w: &mut W) -> Result<usize, io::Error> {
         let mut len = 0;
-        len += VarInt::from(self.0.len()).consensus_encode(w)?;
+        len += w.emit_compact_size(self.0.len())?;
         for header in self.0.iter() {
             len += header.consensus_encode(w)?;
             len += 0u8.consensus_encode(w)?;
@@ -410,14 +411,14 @@ impl Decodable for HeaderDeserializationWrapper {
     fn consensus_decode_from_finite_reader<R: BufRead + ?Sized>(
         r: &mut R,
     ) -> Result<Self, encode::Error> {
-        let len = VarInt::consensus_decode(r)?.0;
+        let len = r.read_compact_size()?;
         // should be above usual number of items to avoid
         // allocation
         let mut ret = Vec::with_capacity(core::cmp::min(1024 * 16, len as usize));
         for _ in 0..len {
             ret.push(Decodable::consensus_decode(r)?);
             if u8::consensus_decode(r)? != 0u8 {
-                return Err(encode::Error::ParseFailed(
+                return Err(consensus::parse_failed_error(
                     "Headers message should not contain transactions",
                 ));
             }

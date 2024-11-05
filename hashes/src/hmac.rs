@@ -19,17 +19,6 @@ use crate::{FromSliceError, GeneralHash, Hash, HashEngine};
 #[repr(transparent)]
 pub struct Hmac<T: GeneralHash>(T);
 
-#[cfg(feature = "schemars")]
-impl<T: GeneralHash + schemars::JsonSchema> schemars::JsonSchema for Hmac<T> {
-    fn is_referenceable() -> bool { <T as schemars::JsonSchema>::is_referenceable() }
-
-    fn schema_name() -> alloc::string::String { <T as schemars::JsonSchema>::schema_name() }
-
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        <T as schemars::JsonSchema>::json_schema(gen)
-    }
-}
-
 impl<T: GeneralHash + str::FromStr> str::FromStr for Hmac<T> {
     type Err = <T as str::FromStr>::Err;
     fn from_str(s: &str) -> Result<Self, Self::Err> { Ok(Hmac(str::FromStr::from_str(s)?)) }
@@ -102,7 +91,7 @@ impl<T: GeneralHash> HmacEngine<T> {
 impl<T: GeneralHash> HashEngine for HmacEngine<T> {
     const BLOCK_SIZE: usize = T::Engine::BLOCK_SIZE;
 
-    fn n_bytes_hashed(&self) -> usize { self.iengine.n_bytes_hashed() }
+    fn n_bytes_hashed(&self) -> u64 { self.iengine.n_bytes_hashed() }
 
     fn input(&mut self, buf: &[u8]) { self.iengine.input(buf) }
 }
@@ -138,13 +127,14 @@ impl<T: GeneralHash> GeneralHash for Hmac<T> {
 impl<T: GeneralHash> Hash for Hmac<T> {
     type Bytes = T::Bytes;
 
+    fn from_byte_array(bytes: T::Bytes) -> Self { Hmac(T::from_byte_array(bytes)) }
+
+    #[allow(deprecated)]
     fn from_slice(sl: &[u8]) -> Result<Hmac<T>, FromSliceError> { T::from_slice(sl).map(Hmac) }
 
     fn to_byte_array(self) -> Self::Bytes { self.0.to_byte_array() }
 
     fn as_byte_array(&self) -> &Self::Bytes { self.0.as_byte_array() }
-
-    fn from_byte_array(bytes: T::Bytes) -> Self { Hmac(T::from_byte_array(bytes)) }
 }
 
 #[cfg(feature = "serde")]
@@ -318,7 +308,7 @@ mod tests {
             0x0b, 0x2d, 0x8a, 0x60, 0x0b, 0xdf, 0x4c, 0x0c,
         ];
 
-        let hash = Hmac::<sha512::Hash>::from_slice(&HASH_BYTES).expect("right number of bytes");
+        let hash = Hmac::<sha512::Hash>::from_byte_array(HASH_BYTES);
         assert_tokens(&hash.compact(), &[Token::BorrowedBytes(&HASH_BYTES[..])]);
         assert_tokens(
             &hash.readable(),

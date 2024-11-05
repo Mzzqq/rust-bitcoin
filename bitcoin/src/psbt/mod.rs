@@ -27,7 +27,7 @@ use crate::key::{TapTweak, XOnlyPublicKey};
 use crate::prelude::{btree_map, BTreeMap, BTreeSet, Borrow, Box, Vec};
 use crate::script::ScriptExt as _;
 use crate::sighash::{self, EcdsaSighashType, Prevouts, SighashCache};
-use crate::transaction::{self, Transaction, TxOut};
+use crate::transaction::{self, Transaction, TransactionExt as _, TxOut};
 use crate::{Amount, FeeRate, TapLeafHash, TapSighashType};
 
 #[rustfmt::skip]                // Keep public re-exports separate.
@@ -762,15 +762,15 @@ impl GetKey for Xpriv {
             KeyRequest::Pubkey(_) => Err(GetKeyError::NotSupported),
             KeyRequest::Bip32((fingerprint, path)) => {
                 let key = if self.fingerprint(secp) == *fingerprint {
-                    let k = self.derive_priv(secp, &path);
-                    Some(k.to_priv())
+                    let k = self.derive_xpriv(secp, &path);
+                    Some(k.to_private_key())
                 } else if self.parent_fingerprint == *fingerprint
                     && !path.is_empty()
                     && path[0] == self.child_number
                 {
                     let path = DerivationPath::from_iter(path.into_iter().skip(1).copied());
-                    let k = self.derive_priv(secp, &path);
-                    Some(k.to_priv())
+                    let k = self.derive_xpriv(secp, &path);
+                    Some(k.to_private_key())
                 } else {
                     None
                 };
@@ -1369,9 +1369,9 @@ mod tests {
             ChildNumber::from_normal_idx(31337).unwrap(),
         ];
 
-        sk = sk.derive_priv(secp, &dpath);
+        sk = sk.derive_xpriv(secp, &dpath);
 
-        let pk = Xpub::from_priv(secp, &sk);
+        let pk = Xpub::from_xpriv(secp, &sk);
 
         hd_keypaths.insert(pk.public_key, (fprint, dpath.into()));
 
@@ -1440,7 +1440,7 @@ mod tests {
     #[test]
     fn serialize_then_deserialize_psbtkvpair() {
         let expected = raw::Pair {
-            key: raw::Key { type_value: 0u8, key_data: vec![42u8, 69u8] },
+            key: raw::Key { type_value: 0u64, key_data: vec![42u8, 69u8] },
             value: vec![69u8, 42u8, 4u8],
         };
 
@@ -1850,7 +1850,7 @@ mod tests {
 
             let mut unknown: BTreeMap<raw::Key, Vec<u8>> = BTreeMap::new();
             let key: raw::Key =
-                raw::Key { type_value: 0x0fu8, key_data: hex!("010203040506070809") };
+                raw::Key { type_value: 0x0fu64, key_data: hex!("010203040506070809") };
             let value: Vec<u8> = hex!("0102030405060708090a0b0c0d0e0f");
 
             unknown.insert(key, value);
@@ -1886,7 +1886,7 @@ mod tests {
             #[cfg(not(feature = "std"))]
             assert_eq!(
                 err.to_string(),
-                "invalid hash when parsing slice: invalid slice length 33 (expected 32)"
+                "invalid hash when parsing slice: could not convert slice to array"
             );
             let err = hex_psbt("70736274ff01005e02000000019bd48765230bf9a72e662001f972556e54f0c6f97feb56bcb5600d817f6995260100000000ffffffff0148e6052a01000000225120030da4fce4f7db28c2cb2951631e003713856597fe963882cb500e68112cca63000000000001012b00f2052a01000000225120c2247efbfd92ac47f6f40b8d42d169175a19fa9fa10e4a25d7f35eb4dd85b69241142cb13ac68248de806aa6a3659cf3c03eb6821d09c8114a4e868febde865bb6d2cd970e15f53fc0c82f950fd560ffa919b76172be017368a89913af074f400b094289756aa3739ccc689ec0fcf3a360be32cc0b59b16e93a1e8bb4605726b2ca7a3ff706c4176649632b2cc68e1f912b8a578e3719ce7710885c7a966f49bcd43cb01010000").unwrap_err();
             #[cfg(feature = "std")]
@@ -2080,7 +2080,7 @@ mod tests {
     fn serialize_and_deserialize_proprietary() {
         let mut psbt: Psbt = hex_psbt("70736274ff0100a00200000002ab0949a08c5af7c49b8212f417e2f15ab3f5c33dcf153821a8139f877a5b7be40000000000feffffffab0949a08c5af7c49b8212f417e2f15ab3f5c33dcf153821a8139f877a5b7be40100000000feffffff02603bea0b000000001976a914768a40bbd740cbe81d988e71de2a4d5c71396b1d88ac8e240000000000001976a9146f4620b553fa095e721b9ee0efe9fa039cca459788ac000000000001076a47304402204759661797c01b036b25928948686218347d89864b719e1f7fcf57d1e511658702205309eabf56aa4d8891ffd111fdf1336f3a29da866d7f8486d75546ceedaf93190121035cdc61fc7ba971c0b501a646a2a83b102cb43881217ca682dc86e2d73fa882920001012000e1f5050000000017a9143545e6e33b832c47050f24d3eeb93c9c03948bc787010416001485d13537f2e265405a34dbafa9e3dda01fb82308000000").unwrap();
         psbt.proprietary.insert(
-            raw::ProprietaryKey { prefix: b"test".to_vec(), subtype: 0u8, key: b"test".to_vec() },
+            raw::ProprietaryKey { prefix: b"test".to_vec(), subtype: 0u64, key: b"test".to_vec() },
             b"test".to_vec(),
         );
         assert!(!psbt.proprietary.is_empty());
@@ -2155,7 +2155,7 @@ mod tests {
                             vout: 0,
                         },
                         sequence: Sequence::ENABLE_LOCKTIME_NO_RBF,
-                        ..Default::default()
+                        ..TxIn::EMPTY_COINBASE
                     }
                 ],
                 output: vec![
@@ -2186,7 +2186,7 @@ mod tests {
                                     vout: 1,
                                 },
                                 sequence: Sequence::MAX,
-                                ..Default::default()
+                                ..TxIn::EMPTY_COINBASE
                             },
                             TxIn {
                                 previous_output: OutPoint {
@@ -2194,7 +2194,7 @@ mod tests {
                                     vout: 1,
                                 },
                                 sequence: Sequence::MAX,
-                                ..Default::default()
+                                ..TxIn::EMPTY_COINBASE
                             }
                         ],
                         output: vec![
@@ -2258,7 +2258,7 @@ mod tests {
         let unsigned_tx = Transaction {
             version: transaction::Version::TWO,
             lock_time: absolute::LockTime::ZERO,
-            input: vec![TxIn::default(), TxIn::default()],
+            input: vec![TxIn::EMPTY_COINBASE, TxIn::EMPTY_COINBASE],
             output: vec![TxOut::NULL],
         };
         let mut psbt = Psbt::from_unsigned_tx(unsigned_tx).unwrap();

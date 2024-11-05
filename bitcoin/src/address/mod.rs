@@ -59,8 +59,9 @@ use crate::taproot::TapNodeHash;
 #[rustfmt::skip]                // Keep public re-exports separate.
 #[doc(inline)]
 pub use self::error::{
-        FromScriptError, InvalidBase58PayloadLengthError, InvalidLegacyPrefixError, LegacyAddressTooLongError,
-        NetworkValidationError, ParseError, UnknownAddressTypeError, UnknownHrpError,
+        Base58Error, Bech32Error, FromScriptError, InvalidBase58PayloadLengthError,
+        InvalidLegacyPrefixError, LegacyAddressTooLongError, NetworkValidationError,
+        ParseError, UnknownAddressTypeError, UnknownHrpError, ParseBech32Error,
 };
 
 /// The different types of addresses.
@@ -194,7 +195,7 @@ impl fmt::Display for AddressInner {
 pub enum KnownHrp {
     /// The main Bitcoin network.
     Mainnet,
-    /// The test networks, testnet and signet.
+    /// The test networks, testnet (testnet3), testnet4, and signet.
     Testnets,
     /// The regtest network.
     Regtest,
@@ -207,7 +208,7 @@ impl KnownHrp {
 
         match network {
             Bitcoin => Self::Mainnet,
-            Testnet | Signet => Self::Testnets,
+            Testnet(_) | Signet => Self::Testnets,
             Regtest => Self::Regtest,
         }
     }
@@ -430,7 +431,7 @@ impl Address {
     ///
     /// This is a segwit address type that looks familiar (as p2sh) to legacy clients.
     pub fn p2shwpkh(pk: CompressedPublicKey, network: impl Into<NetworkKind>) -> Address {
-        let builder = script::Builder::new().push_int(0).push_slice(pk.wpubkey_hash());
+        let builder = script::Builder::new().push_int_unchecked(0).push_slice(pk.wpubkey_hash());
         let script_hash = builder.as_script().script_hash().expect("script is less than 520 bytes");
         Address::p2sh_from_hash(script_hash, network)
     }
@@ -458,7 +459,7 @@ impl Address {
         network: impl Into<NetworkKind>,
     ) -> Result<Address, WitnessScriptSizeError> {
         let hash = witness_script.wscript_hash()?;
-        let builder = script::Builder::new().push_int(0).push_slice(&hash);
+        let builder = script::Builder::new().push_int_unchecked(0).push_slice(hash);
         let script_hash = builder.as_script().script_hash().expect("script is less than 520 bytes");
         Ok(Address::p2sh_from_hash(script_hash, network))
     }
@@ -708,11 +709,11 @@ impl Address<NetworkUnchecked> {
     /// network a simple comparison is not enough anymore. Instead this function can be used.
     ///
     /// ```rust
-    /// use bitcoin::{Address, Network};
+    /// use bitcoin::{Address, Network, TestnetVersion};
     /// use bitcoin::address::NetworkUnchecked;
     ///
     /// let address: Address<NetworkUnchecked> = "2N83imGV3gPwBzKJQvWJ7cRUY2SpUyU6A5e".parse().unwrap();
-    /// assert!(address.is_valid_for_network(Network::Testnet));
+    /// assert!(address.is_valid_for_network(Network::Testnet(TestnetVersion::V3)));
     /// assert!(address.is_valid_for_network(Network::Regtest));
     /// assert!(address.is_valid_for_network(Network::Signet));
     ///
@@ -720,7 +721,7 @@ impl Address<NetworkUnchecked> {
     ///
     /// let address: Address<NetworkUnchecked> = "32iVBEu4dxkUQk9dJbZUiBiQdmypcEyJRf".parse().unwrap();
     /// assert!(address.is_valid_for_network(Network::Bitcoin));
-    /// assert_eq!(address.is_valid_for_network(Network::Testnet), false);
+    /// assert_eq!(address.is_valid_for_network(Network::Testnet(TestnetVersion::V4)), false);
     /// ```
     pub fn is_valid_for_network(&self, n: Network) -> bool {
         use AddressInner::*;
@@ -799,47 +800,22 @@ impl Address<NetworkUnchecked> {
         };
         Address(inner, PhantomData)
     }
-}
 
-impl From<Address> for ScriptBuf {
-    fn from(a: Address) -> Self { a.script_pubkey() }
-}
+    /// Parse a bech32 Address string
+    pub fn from_bech32_str(s: &str) -> Result<Address<NetworkUnchecked>, Bech32Error> {
+        let (hrp, witness_version, data) =
+            bech32::segwit::decode(s).map_err(|e| Bech32Error::ParseBech32(ParseBech32Error(e)))?;
+        let version = WitnessVersion::try_from(witness_version.to_u8())?;
+        let program = WitnessProgram::new(version, &data)
+            .expect("bech32 guarantees valid program length for witness");
 
-// Alternate formatting `{:#}` is used to return uppercase version of bech32 addresses which should
-// be used in QR codes, see [`Address::to_qr_uri`].
-impl fmt::Display for Address {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result { fmt::Display::fmt(&self.0, fmt) }
-}
-
-impl<V: NetworkValidation> fmt::Debug for Address<V> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if V::IS_CHECKED {
-            fmt::Display::fmt(&self.0, f)
-        } else {
-            write!(f, "Address<NetworkUnchecked>(")?;
-            fmt::Display::fmt(&self.0, f)?;
-            write!(f, ")")
-        }
+        let hrp = KnownHrp::from_hrp(hrp)?;
+        let inner = AddressInner::Segwit { program, hrp };
+        Ok(Address(inner, PhantomData))
     }
-}
 
-/// Address can be parsed only with `NetworkUnchecked`.
-impl FromStr for Address<NetworkUnchecked> {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Address<NetworkUnchecked>, ParseError> {
-        if let Ok((hrp, witness_version, data)) = bech32::segwit::decode(s) {
-            let version = WitnessVersion::try_from(witness_version.to_u8())?;
-            let program = WitnessProgram::new(version, &data)
-                .expect("bech32 guarantees valid program length for witness");
-
-            let hrp = KnownHrp::from_hrp(hrp)?;
-            let inner = AddressInner::Segwit { program, hrp };
-            return Ok(Address(inner, PhantomData));
-        }
-
-        // If segwit decoding fails, assume its a legacy address.
-
+    /// Parse a base58 Address string
+    pub fn from_base58_str(s: &str) -> Result<Address<NetworkUnchecked>, Base58Error> {
         if s.len() > 50 {
             return Err(LegacyAddressTooLongError { length: s.len() }.into());
         }
@@ -875,6 +851,61 @@ impl FromStr for Address<NetworkUnchecked> {
     }
 }
 
+impl From<Address> for ScriptBuf {
+    fn from(a: Address) -> Self { a.script_pubkey() }
+}
+
+// Alternate formatting `{:#}` is used to return uppercase version of bech32 addresses which should
+// be used in QR codes, see [`Address::to_qr_uri`].
+impl fmt::Display for Address {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result { fmt::Display::fmt(&self.0, fmt) }
+}
+
+impl<V: NetworkValidation> fmt::Debug for Address<V> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if V::IS_CHECKED {
+            fmt::Display::fmt(&self.0, f)
+        } else {
+            write!(f, "Address<NetworkUnchecked>(")?;
+            fmt::Display::fmt(&self.0, f)?;
+            write!(f, ")")
+        }
+    }
+}
+
+/// Address can be parsed only with `NetworkUnchecked`.
+///
+/// Only segwit bech32 addresses prefixed with `bc`, `bcrt` or `tb` and legacy base58 addresses
+/// prefixed with `1`, `2, `3`, `m` or `n` are supported.
+///
+/// # Errors
+///
+/// - [`ParseError::Bech32`] if the segwit address begins with a `bc`, `bcrt` or `tb` and is not a
+///   valid bech32 address.
+///
+/// - [`ParseError::Base58`] if the legacy address begins with a `1`, `2`, `3`, `m` or `n` and is
+///   not a valid base58 address.
+///
+/// - [`UnknownHrpError`] if the address does not begin with one of the above segwit or
+///   legacy prifixes.
+impl FromStr for Address<NetworkUnchecked> {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Address<NetworkUnchecked>, ParseError> {
+        if ["bc1", "bcrt1", "tb1"].iter().any(|&prefix| s.to_lowercase().starts_with(prefix)) {
+            Ok(Address::from_bech32_str(s)?)
+        } else if ["1", "2", "3", "m", "n"].iter().any(|&prefix| s.starts_with(prefix)) {
+            Ok(Address::from_base58_str(s)?)
+        } else {
+            let hrp = match s.rfind('1') {
+                Some(pos) => &s[..pos],
+                None => s,
+            };
+            Err(UnknownHrpError(hrp.to_owned()).into())
+        }
+    }
+}
+
 /// Convert a byte array of a pubkey hash into a segwit redeem hash
 fn segwit_redeem_hash(pubkey_hash: PubkeyHash) -> hash160::Hash {
     let mut sha_engine = hash160::Hash::engine();
@@ -888,8 +919,8 @@ mod tests {
     use hex_lit::hex;
 
     use super::*;
-    use crate::network::params;
     use crate::network::Network::{Bitcoin, Testnet};
+    use crate::network::{params, TestnetVersion};
     use crate::script::ScriptBufExt as _;
 
     fn roundtrips(addr: &Address, network: Network) {
@@ -942,7 +973,7 @@ mod tests {
         let addr = Address::p2pkh(key, NetworkKind::Test);
         assert_eq!(&addr.to_string(), "mqkhEMH6NCeYjFybv7pvFC22MFeaNT9AQC");
         assert_eq!(addr.address_type(), Some(AddressType::P2pkh));
-        roundtrips(&addr, Testnet);
+        roundtrips(&addr, Testnet(TestnetVersion::V3));
     }
 
     #[test]
@@ -965,7 +996,7 @@ mod tests {
         let addr = Address::p2sh(&script, NetworkKind::Test).unwrap();
         assert_eq!(&addr.to_string(), "2N3zXjbwdTcPsJiy8sUK9FhWJhqQCxA8Jjr");
         assert_eq!(addr.address_type(), Some(AddressType::P2sh));
-        roundtrips(&addr, Testnet);
+        roundtrips(&addr, Testnet(TestnetVersion::V3));
     }
 
     #[test]
@@ -1282,7 +1313,7 @@ mod tests {
         let address = address_string
             .parse::<Address<_>>()
             .expect("address")
-            .require_network(Network::Testnet)
+            .require_network(Network::Testnet(TestnetVersion::V3))
             .expect("testnet");
 
         let pubkey_string = "04e96e22004e3db93530de27ccddfdf1463975d2138ac018fc3e7ba1a2e5e0aad8e424d0b55e2436eb1d0dcd5cb2b8bcc6d53412c22f358de57803a6a655fbbd04";

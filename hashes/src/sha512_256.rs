@@ -7,12 +7,9 @@
 //! produces an entirely different hash compared to sha512. More information at
 //! <https://eprint.iacr.org/2010/548.pdf>.
 
-use core::ops::Index;
-use core::slice::SliceIndex;
-
 use crate::sha512;
 
-crate::internal_macros::hash_type! {
+crate::internal_macros::general_hash_type! {
     256,
     false,
     "Output of the SHA512/256 hash function.\n\nSHA512/256 is a hash function that uses the sha512 algorithm but it truncates the output to 256 bits. It has different initial constants than sha512 so it produces an entirely different hash compared to sha512. More information at <https://eprint.iacr.org/2010/548.pdf>."
@@ -20,7 +17,7 @@ crate::internal_macros::hash_type! {
 
 fn from_engine(e: HashEngine) -> Hash {
     let mut ret = [0; 32];
-    ret.copy_from_slice(&sha512::from_engine(e.0)[..32]);
+    ret.copy_from_slice(&sha512::from_engine(e.0).as_byte_array()[..32]);
     Hash(ret)
 }
 
@@ -45,7 +42,7 @@ impl Default for HashEngine {
 impl crate::HashEngine for HashEngine {
     const BLOCK_SIZE: usize = sha512::BLOCK_SIZE;
 
-    fn n_bytes_hashed(&self) -> usize { self.0.n_bytes_hashed() }
+    fn n_bytes_hashed(&self) -> u64 { self.0.n_bytes_hashed() }
 
     fn input(&mut self, inp: &[u8]) { self.0.input(inp); }
 }
@@ -125,7 +122,7 @@ mod tests {
             // Hash through high-level API, check hex encoding/decoding
             let hash = sha512_256::Hash::hash(test.input.as_bytes());
             assert_eq!(hash, test.output_str.parse::<sha512_256::Hash>().expect("parse hex"));
-            assert_eq!(hash[..], test.output);
+            assert_eq!(hash.as_byte_array(), &test.output);
             assert_eq!(hash.to_string(), test.output_str);
 
             // Hash through engine, checking that we can input byte by byte

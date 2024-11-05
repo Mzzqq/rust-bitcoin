@@ -7,6 +7,7 @@ use bitcoin::key::{Keypair, TapTweak, TweakedKeypair, UntweakedPublicKey};
 use bitcoin::locktime::absolute;
 use bitcoin::secp256k1::{rand, Message, Secp256k1, SecretKey, Signing, Verification};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
+use bitcoin::witness::WitnessExt as _;
 use bitcoin::{
     transaction, Address, Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
     Txid, Witness,
@@ -34,7 +35,7 @@ fn main() {
     let input = TxIn {
         previous_output: dummy_out_point, // The dummy output we are spending.
         script_sig: ScriptBuf::default(), // For a p2tr script_sig is empty.
-        sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+        sequence: Sequence::ENABLE_LOCKTIME_AND_RBF,
         witness: Witness::default(), // Filled in after signing.
     };
 

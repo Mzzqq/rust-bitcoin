@@ -2,16 +2,14 @@
 
 //! Rust hashes library.
 //!
-//! This is a simple, no-dependency library which implements the hash functions
-//! needed by Bitcoin. These are SHA256, SHA256d, and RIPEMD160. As an ancillary
-//! thing, it exposes hexadecimal serialization and deserialization, since these
-//! are needed to display hashes anway.
+//! This library implements the hash functions needed by Bitcoin. As an ancillary thing, it exposes
+//! hexadecimal serialization and deserialization, since these are needed to display hashes.
 //!
 //! ## Commonly used operations
 //!
 //! Hashing a single byte slice or a string:
 //!
-//! ```rust
+//! ```
 //! use bitcoin_hashes::Sha256;
 //!
 //! let bytes = [0u8; 5];
@@ -22,39 +20,34 @@
 //!
 //! Hashing content from a reader:
 //!
-//! ```rust
-//! #[cfg(std)]
-//! # fn main() -> std::io::Result<()> {
-//! let mut reader: &[u8] = b"hello"; // in real code, this could be a `File` or `TcpStream`
-//! let mut engine = Sha256::engine();
-//! std::io::copy(&mut reader, &mut engine)?;
-//! let hash = Sha256::from_engine(engine);
-//! # Ok(())
-//! # }
+//! ```
+//! # #[cfg(feature = "std")] {
+//! use bitcoin_hashes::Sha256;
 //!
-//! #[cfg(not(std))]
-//! # fn main() {}
+//! let mut reader: &[u8] = b"hello"; // In real code, this could be a `File` or `TcpStream`.
+//! let mut engine = Sha256::engine();
+//! std::io::copy(&mut reader, &mut engine).unwrap();
+//! let _hash = Sha256::from_engine(engine);
+//! # }
 //! ```
 //!
 //!
-//! Hashing content by [`std::io::Write`] on `HashEngine`:
+//! Hashing content using [`std::io::Write`] on a `HashEngine`:
 //!
-//! ```rust
-//! #[cfg(std)]
-//! # fn main() -> std::io::Result<()> {
-//! let mut part1: &[u8] = b"hello";
-//! let mut part2: &[u8] = b" ";
-//! let mut part3: &[u8] = b"world";
+//! ```
+//! # #[cfg(feature = "std")] {
+//! use std::io::Write as _;
+//! use bitcoin_hashes::Sha256;
+//!
+//! let part1: &[u8] = b"hello";
+//! let part2: &[u8] = b" ";
+//! let part3: &[u8] = b"world";
 //! let mut engine = Sha256::engine();
-//! engine.write_all(part1)?;
-//! engine.write_all(part2)?;
-//! engine.write_all(part3)?;
-//! let hash = Sha256::from_engine(engine);
-//! # Ok(())
+//! engine.write_all(part1).expect("engine writes don't error");
+//! engine.write_all(part2).unwrap();
+//! engine.write_all(part3).unwrap();
+//! let _hash = Sha256::from_engine(engine);
 //! # }
-//!
-//! #[cfg(not(std))]
-//! # fn main() {}
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -63,6 +56,7 @@
 #![cfg_attr(bench, feature(test))]
 // Coding conventions.
 #![warn(missing_docs)]
+#![warn(deprecated_in_future)]
 #![doc(test(attr(warn(unused))))]
 // Instead of littering the codebase for non-fuzzing and bench code just globally allow.
 #![cfg_attr(hashes_fuzz, allow(dead_code, unused_imports))]
@@ -70,7 +64,6 @@
 // Exclude lints we don't think are valuable.
 #![allow(clippy::needless_question_mark)] // https://github.com/rust-bitcoin/rust-bitcoin/pull/2134
 #![allow(clippy::manual_range_contains)] // More readable than clippy's format.
-#![allow(clippy::needless_borrows_for_generic_args)] // https://github.com/rust-lang/rust-clippy/issues/12454
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -80,8 +73,8 @@ extern crate core;
 #[cfg(feature = "bitcoin-io")]
 extern crate bitcoin_io as io;
 
-#[cfg(feature = "serde")]
 /// A generic serialization/deserialization framework.
+#[cfg(feature = "serde")]
 pub extern crate serde;
 
 #[cfg(all(test, feature = "serde"))]
@@ -100,18 +93,14 @@ pub mod _export {
     }
 }
 
-#[cfg(feature = "schemars")]
-extern crate schemars;
-
 mod internal_macros;
-#[macro_use]
-mod util;
-#[macro_use]
-pub mod serde_macros;
+
 pub mod cmp;
 pub mod hash160;
 pub mod hkdf;
 pub mod hmac;
+#[macro_use]
+pub mod macros;
 pub mod ripemd160;
 pub mod sha1;
 pub mod sha256;
@@ -121,6 +110,17 @@ pub mod sha384;
 pub mod sha512;
 pub mod sha512_256;
 pub mod siphash24;
+
+#[deprecated(since = "0.15.0", note = "use crate::macros instead")]
+pub mod serde_macros {
+    //! Macros for serde trait implementations, and supporting code.
+
+    #[cfg(feature = "serde")]
+    pub mod serde_details {
+        //! Functions used by serde impls of all hashes.
+        pub use crate::macros::serde_details::*;
+    }
+}
 
 use core::{convert, fmt, hash};
 
@@ -182,8 +182,8 @@ pub trait HashEngine: Clone {
     /// Add data to the hash engine.
     fn input(&mut self, data: &[u8]);
 
-    /// Return the number of bytes already n_bytes_hashed(inputted).
-    fn n_bytes_hashed(&self) -> usize;
+    /// Return the number of bytes already input into the engine.
+    fn n_bytes_hashed(&self) -> u64;
 }
 
 /// Trait describing hash digests which can be constructed by hashing arbitrary data.
@@ -274,22 +274,23 @@ pub trait Hash:
     /// Length of the hash, in bytes.
     const LEN: usize = Self::Bytes::LEN;
 
-    /// Copies a byte slice into a hash object.
-    fn from_slice(sl: &[u8]) -> Result<Self, FromSliceError>;
-
-    /// Flag indicating whether user-visible serializations of this hash
-    /// should be backward. For some reason Satoshi decided this should be
-    /// true for `Sha256dHash`, so here we are.
+    /// Flag indicating whether user-visible serializations of this hash should be backward.
+    ///
+    /// For some reason Satoshi decided this should be true for `Sha256dHash`, so here we are.
     const DISPLAY_BACKWARD: bool = false;
+
+    /// Constructs a hash from the underlying byte array.
+    fn from_byte_array(bytes: Self::Bytes) -> Self;
+
+    /// Copies a byte slice into a hash object.
+    #[deprecated(since = "0.15.0", note = "use `from_byte_array` instead")]
+    fn from_slice(sl: &[u8]) -> Result<Self, FromSliceError>;
 
     /// Returns the underlying byte array.
     fn to_byte_array(self) -> Self::Bytes;
 
     /// Returns a reference to the underlying byte array.
     fn as_byte_array(&self) -> &Self::Bytes;
-
-    /// Constructs a hash from the underlying byte array.
-    fn from_byte_array(bytes: Self::Bytes) -> Self;
 }
 
 /// Ensures that a type is an array.
@@ -307,6 +308,13 @@ mod sealed {
     pub trait IsByteArray {}
 
     impl<const N: usize> IsByteArray for [u8; N] {}
+}
+
+fn incomplete_block_len<H: HashEngine>(eng: &H) -> usize {
+    let block_size = <H as HashEngine>::BLOCK_SIZE as u64; // Cast usize to u64 is ok.
+
+    // After modulo operation we know cast u64 to usize as ok.
+    (eng.n_bytes_hashed() % block_size) as usize
 }
 
 /// Attempted to create a hash from an invalid length slice.

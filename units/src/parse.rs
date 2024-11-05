@@ -2,10 +2,10 @@
 
 //! Parsing utilities.
 
-use alloc::string::String;
 use core::fmt;
 use core::str::FromStr;
 
+use internals::error::InputString;
 use internals::write_err;
 
 /// Error with rich context returned when a string can't be parsed as an integer.
@@ -20,26 +20,20 @@ use internals::write_err;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ParseIntError {
-    pub(crate) input: String,
+    pub(crate) input: InputString,
     // for displaying - see Display impl with nice error message below
-    bits: u8,
+    pub(crate) bits: u8,
     // We could represent this as a single bit but it wouldn't actually derease the cost of moving
     // the struct because String contains pointers so there will be padding of bits at least
     // pointer_size - 1 bytes: min 1B in practice.
-    is_signed: bool,
+    pub(crate) is_signed: bool,
     pub(crate) source: core::num::ParseIntError,
-}
-
-impl ParseIntError {
-    /// Returns the input that was attempted to be parsed.
-    pub fn input(&self) -> &str { &self.input }
 }
 
 impl fmt::Display for ParseIntError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let signed = if self.is_signed { "signed" } else { "unsigned" };
-        let n = if self.bits == 8 { "n" } else { "" };
-        write_err!(f, "failed to parse '{}' as a{} {}-bit {} integer", self.input, n, self.bits, signed; self.source)
+        write_err!(f, "{} ({}, {}-bit)", self.input.display_cannot_parse("integer"), signed, self.bits; self.source)
     }
 }
 
@@ -74,7 +68,7 @@ impl_integer!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128);
 ///
 /// If the caller owns `String` or `Box<str>` which is not used later it's better to pass it as
 /// owned since it avoids allocation in error case.
-pub fn int<T: Integer, S: AsRef<str> + Into<String>>(s: S) -> Result<T, ParseIntError> {
+pub fn int<T: Integer, S: AsRef<str> + Into<InputString>>(s: S) -> Result<T, ParseIntError> {
     s.as_ref().parse().map_err(|error| {
         ParseIntError {
             input: s.into(),
@@ -112,10 +106,9 @@ macro_rules! impl_tryfrom_str_from_int_infallible {
 #[macro_export]
 macro_rules! impl_parse_str_from_int_infallible {
     ($to:ident, $inner:ident, $fn:ident) => {
-        #[cfg(all(feature = "alloc", not(feature = "std")))]
-        $crate::impl_tryfrom_str_from_int_infallible!(&str, $to, $inner, $fn; alloc::string::String, $to, $inner, $fn; alloc::boxed::Box<str>, $to, $inner, $fn);
-        #[cfg(feature = "std")]
-        $crate::impl_tryfrom_str_from_int_infallible!(&str, $to, $inner, $fn; std::string::String, $to, $inner, $fn; std::boxed::Box<str>, $to, $inner, $fn);
+        $crate::impl_tryfrom_str_from_int_infallible!(&str, $to, $inner, $fn);
+        #[cfg(feature = "alloc")]
+        $crate::impl_tryfrom_str_from_int_infallible!(alloc::string::String, $to, $inner, $fn; alloc::boxed::Box<str>, $to, $inner, $fn);
 
         impl core::str::FromStr for $to {
             type Err = $crate::parse::ParseIntError;
@@ -148,7 +141,9 @@ macro_rules! impl_tryfrom_str {
 #[macro_export]
 macro_rules! impl_parse_str {
     ($to:ty, $err:ty, $inner_fn:expr) => {
-        $crate::impl_tryfrom_str!(&str, $to, $err, $inner_fn; String, $to, $err, $inner_fn; Box<str>, $to, $err, $inner_fn);
+        $crate::impl_tryfrom_str!(&str, $to, $err, $inner_fn);
+        #[cfg(feature = "alloc")]
+        $crate::impl_tryfrom_str!(alloc::string::String, $to, $err, $inner_fn; alloc::boxed::Box<str>, $to, $err, $inner_fn);
 
         impl core::str::FromStr for $to {
             type Err = $err;
@@ -171,7 +166,7 @@ pub fn hex_remove_prefix(s: &str) -> Result<&str, PrefixedHexError> {
     } else if let Some(checked) = s.strip_prefix("0X") {
         Ok(checked)
     } else {
-        Err(MissingPrefixError::new(s.into()).into())
+        Err(MissingPrefixError::new(s).into())
     }
 }
 
@@ -182,7 +177,7 @@ pub fn hex_remove_prefix(s: &str) -> Result<&str, PrefixedHexError> {
 /// If the input string contains a prefix.
 pub fn hex_check_unprefixed(s: &str) -> Result<&str, UnprefixedHexError> {
     if s.starts_with("0x") || s.starts_with("0X") {
-        return Err(ContainsPrefixError::new(s.into()).into());
+        return Err(ContainsPrefixError::new(s).into());
     }
     Ok(s)
 }
@@ -379,17 +374,17 @@ impl From<ParseIntError> for UnprefixedHexError {
 /// Error returned when a hex string is missing a prefix (e.g. `0x`).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MissingPrefixError {
-    hex: String,
+    hex: InputString,
 }
 
 impl MissingPrefixError {
     /// Creates an error from the string with the missing prefix.
-    pub(crate) fn new(hex: String) -> Self { Self { hex } }
+    pub(crate) fn new(hex: &str) -> Self { Self { hex: hex.into() } }
 }
 
 impl fmt::Display for MissingPrefixError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "hex string is missing a prefix (e.g. 0x): {}", self.hex)
+        write!(f, "{} because it is missing the '0x' prefix", self.hex.display_cannot_parse("hex"))
     }
 }
 
@@ -399,17 +394,17 @@ impl std::error::Error for MissingPrefixError {}
 /// Error when hex string contains a prefix (e.g. 0x).
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ContainsPrefixError {
-    hex: String,
+    hex: InputString,
 }
 
 impl ContainsPrefixError {
     /// Creates an error from the string that contains the prefix.
-    pub(crate) fn new(hex: String) -> Self { Self { hex } }
+    pub(crate) fn new(hex: &str) -> Self { Self { hex: hex.into() } }
 }
 
 impl fmt::Display for ContainsPrefixError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "hex string contains a prefix: {}", self.hex)
+        write!(f, "{} because it contains the '0x' prefix", self.hex.display_cannot_parse("hex"))
     }
 }
 

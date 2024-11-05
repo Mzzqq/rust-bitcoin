@@ -17,8 +17,7 @@ use serde::de::{SeqAccess, Unexpected, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{Deserializer, Serializer};
 
-use super::encode::Error as ConsensusError;
-use super::{Decodable, Encodable};
+use super::{Decodable, Encodable, ParseError};
 use crate::consensus::{DecodeError, IterReader};
 
 /// Hex-encoding strategy
@@ -75,7 +74,9 @@ pub mod hex {
     pub struct Encoder<C: Case>(BufEncoder<{ HEX_BUF_SIZE }>, PhantomData<C>);
 
     impl<C: Case> From<super::Hex<C>> for Encoder<C> {
-        fn from(_: super::Hex<C>) -> Self { Encoder(BufEncoder::new(), Default::default()) }
+        fn from(_: super::Hex<C>) -> Self {
+            Encoder(BufEncoder::new(C::INTERNAL_CASE), Default::default())
+        }
     }
 
     impl<C: Case> super::EncodeBytes for Encoder<C> {
@@ -84,7 +85,7 @@ pub mod hex {
                 if self.0.is_full() {
                     self.flush(writer)?;
                 }
-                bytes = self.0.put_bytes_min(bytes, C::INTERNAL_CASE);
+                bytes = self.0.put_bytes_min(bytes);
             }
             Ok(())
         }
@@ -118,7 +119,7 @@ pub mod hex {
         }
     }
 
-    impl<'a> Iterator for Decoder<'a> {
+    impl Iterator for Decoder<'_> {
         type Item = Result<u8, DecodeError>;
 
         fn next(&mut self) -> Option<Self::Item> {
@@ -159,7 +160,6 @@ struct DisplayWrapper<'a, T: 'a + Encodable, E>(&'a T, PhantomData<E>);
 impl<'a, T: 'a + Encodable, E: ByteEncoder> fmt::Display for DisplayWrapper<'a, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut writer = IoWrapper::<'_, _, E::Encoder>::new(f, E::default().into());
-        #[allow(unused_variables)] // When debug_assertions are not enabled.
         self.0.consensus_encode(&mut writer).map_err(|error| {
             #[cfg(debug_assertions)]
             {
@@ -174,6 +174,8 @@ impl<'a, T: 'a + Encodable, E: ByteEncoder> fmt::Display for DisplayWrapper<'a, 
                     );
                 }
             }
+            #[cfg(not(debug_assertions))]
+            let _ = error;
             fmt::Error
         })?;
         let result = writer.actually_flush();
@@ -200,7 +202,6 @@ impl<W: fmt::Write> ErrorTrackingWriter<W> {
     }
 
     #[track_caller]
-    #[allow(unused_variables)] // When debug_assertions are not enabled.
     fn assert_no_error(&self, fun: &str) {
         #[cfg(debug_assertions)]
         {
@@ -208,6 +209,8 @@ impl<W: fmt::Write> ErrorTrackingWriter<W> {
                 panic!("`{}` called on errored writer", fun);
             }
         }
+        #[cfg(not(debug_assertions))]
+        let _ = fun;
     }
 
     fn assert_was_error<Offender>(&self) {
@@ -219,12 +222,13 @@ impl<W: fmt::Write> ErrorTrackingWriter<W> {
         }
     }
 
-    #[allow(unused_variables)] // When debug_assertions are not enabled.
     fn set_error(&mut self, was: bool) {
         #[cfg(debug_assertions)]
         {
             self.was_error |= was;
         }
+        #[cfg(not(debug_assertions))]
+        let _ = was;
     }
 
     fn check_err<T, E>(&mut self, result: Result<T, E>) -> Result<T, E> {
@@ -260,7 +264,7 @@ impl<'a, W: fmt::Write, E: EncodeBytes> IoWrapper<'a, W, E> {
     fn actually_flush(&mut self) -> fmt::Result { self.encoder.flush(&mut self.writer) }
 }
 
-impl<'a, W: fmt::Write, E: EncodeBytes> Write for IoWrapper<'a, W, E> {
+impl<W: fmt::Write, E: EncodeBytes> Write for IoWrapper<'_, W, E> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         match self.encoder.encode_chunk(&mut self.writer, bytes) {
             Ok(()) => Ok(bytes.len()),
@@ -355,24 +359,24 @@ impl<D: fmt::Display> serde::de::Expected for DisplayExpected<D> {
 }
 
 // not a trait impl because we panic on some variants
-fn consensus_error_into_serde<E: serde::de::Error>(error: ConsensusError) -> E {
+fn consensus_error_into_serde<E: serde::de::Error>(error: ParseError) -> E {
     match error {
-        ConsensusError::Io(error) => panic!("unexpected IO error {:?}", error),
-        ConsensusError::OversizedVectorAllocation { requested, max } => E::custom(format_args!(
+        ParseError::MissingData => E::custom("missing data (early end of file or slice too short)"),
+        ParseError::OversizedVectorAllocation { requested, max } => E::custom(format_args!(
             "the requested allocation of {} items exceeds maximum of {}",
             requested, max
         )),
-        ConsensusError::InvalidChecksum { expected, actual } => E::invalid_value(
+        ParseError::InvalidChecksum { expected, actual } => E::invalid_value(
             Unexpected::Bytes(&actual),
             &DisplayExpected(format_args!(
                 "checksum {:02x}{:02x}{:02x}{:02x}",
                 expected[0], expected[1], expected[2], expected[3]
             )),
         ),
-        ConsensusError::NonMinimalVarInt =>
+        ParseError::NonMinimalVarInt =>
             E::custom(format_args!("compact size was not encoded minimally")),
-        ConsensusError::ParseFailed(msg) => E::custom(msg),
-        ConsensusError::UnsupportedSegwitFlag(flag) =>
+        ParseError::ParseFailed(msg) => E::custom(msg),
+        ParseError::UnsupportedSegwitFlag(flag) =>
             E::invalid_value(Unexpected::Unsigned(flag.into()), &"segwit version 1 flag"),
     }
 }
@@ -384,8 +388,8 @@ where
     fn unify(self) -> E {
         match self {
             DecodeError::Other(error) => error,
-            DecodeError::TooManyBytes => E::custom(format_args!("got more bytes than expected")),
-            DecodeError::Consensus(error) => consensus_error_into_serde(error),
+            DecodeError::Unconsumed => E::custom(format_args!("got more bytes than expected")),
+            DecodeError::Parse(e) => consensus_error_into_serde(e),
         }
     }
 }
@@ -397,8 +401,8 @@ where
     fn into_de_error<DE: serde::de::Error>(self) -> DE {
         match self {
             DecodeError::Other(error) => error.into_de_error(),
-            DecodeError::TooManyBytes => DE::custom(format_args!("got more bytes than expected")),
-            DecodeError::Consensus(error) => consensus_error_into_serde(error),
+            DecodeError::Unconsumed => DE::custom(format_args!("got more bytes than expected")),
+            DecodeError::Parse(e) => consensus_error_into_serde(e),
         }
     }
 }
@@ -470,7 +474,7 @@ impl<E> With<E> {
 
 struct HRVisitor<T: Decodable, D: for<'a> ByteDecoder<'a>>(PhantomData<fn() -> (T, D)>);
 
-impl<'de, T: Decodable, D: for<'a> ByteDecoder<'a>> Visitor<'de> for HRVisitor<T, D> {
+impl<T: Decodable, D: for<'a> ByteDecoder<'a>> Visitor<'_> for HRVisitor<T, D> {
     type Value = T;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

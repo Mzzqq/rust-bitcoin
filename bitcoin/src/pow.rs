@@ -254,7 +254,7 @@ impl Target {
     /// Panics if `self` is zero (divide by zero).
     ///
     /// [max]: Target::max
-    /// [target]: crate::block::Header::target
+    /// [target]: crate::block::HeaderExt::target
     #[cfg_attr(all(test, mutate), mutate)]
     pub fn difficulty(&self, params: impl AsRef<Params>) -> u128 {
         // Panic here may be eaiser to debug than during the actual division.
@@ -286,12 +286,12 @@ impl Target {
 
     /// Computes the minimum valid [`Target`] threshold allowed for a block in which a difficulty
     /// adjustment occurs.
-    #[deprecated(since = "0.32.0", note = "use min_transition_threshold instead")]
+    #[deprecated(since = "0.32.0", note = "use `min_transition_threshold` instead")]
     pub fn min_difficulty_transition_threshold(&self) -> Self { self.min_transition_threshold() }
 
     /// Computes the maximum valid [`Target`] threshold allowed for a block in which a difficulty
     /// adjustment occurs.
-    #[deprecated(since = "0.32.0", note = "use max_transition_threshold instead")]
+    #[deprecated(since = "0.32.0", note = "use `max_transition_threshold` instead")]
     pub fn max_difficulty_transition_threshold(&self) -> Self {
         self.max_transition_threshold_unchecked()
     }
@@ -428,6 +428,11 @@ define_extension_trait! {
             CompactTarget::from_next_work_required(bits, timespan.into(), params)
         }
     }
+}
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::CompactTarget {}
 }
 
 impl From<CompactTarget> for Target {
@@ -991,7 +996,7 @@ impl<'de> crate::serde::Deserialize<'de> for U256 {
         if d.is_human_readable() {
             struct HexVisitor;
 
-            impl<'de> de::Visitor<'de> for HexVisitor {
+            impl de::Visitor<'_> for HexVisitor {
                 type Value = U256;
 
                 fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1031,7 +1036,7 @@ impl<'de> crate::serde::Deserialize<'de> for U256 {
         } else {
             struct BytesVisitor;
 
-            impl<'de> serde::de::Visitor<'de> for BytesVisitor {
+            impl serde::de::Visitor<'_> for BytesVisitor {
                 type Value = U256;
 
                 fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -1771,7 +1776,7 @@ mod tests {
         // Block 2015, the only information used are `bits` and `time`
         let current = Header {
             version: Version::ONE,
-            prev_blockhash: BlockHash::all_zeros(),
+            prev_blockhash: BlockHash::from_byte_array([0; 32]),
             merkle_root: TxMerkleNode::from_byte_array([0; 32]),
             time: 1599332177,
             bits: epoch_start.bits,
@@ -1793,7 +1798,7 @@ mod tests {
         // Block 2016, the only information used is `time`
         let epoch_start = Header {
             version: Version::ONE,
-            prev_blockhash: BlockHash::all_zeros(),
+            prev_blockhash: BlockHash::from_byte_array([0; 32]),
             merkle_root: TxMerkleNode::from_byte_array([0; 32]),
             time: 1599332844,
             bits: starting_bits,
@@ -1803,7 +1808,7 @@ mod tests {
         // Block 4031, the only information used are `bits` and `time`
         let current = Header {
             version: Version::ONE,
-            prev_blockhash: BlockHash::all_zeros(),
+            prev_blockhash: BlockHash::from_byte_array([0; 32]),
             merkle_root: TxMerkleNode::from_byte_array([0; 32]),
             time: 1600591200,
             bits: starting_bits,

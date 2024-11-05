@@ -12,17 +12,17 @@ use core::{cmp, convert, fmt};
 #[cfg(all(test, mutate))]
 use mutagen::mutate;
 
-#[cfg(doc)]
-use crate::relative;
 use crate::Sequence;
+#[cfg(all(doc, feature = "alloc"))]
+use crate::{relative, TxIn};
 
 #[rustfmt::skip]                // Keep public re-exports separate.
 #[doc(inline)]
-pub use units::locktime::relative::*;
+pub use units::locktime::relative::{Height, Time, TimeOverflowError};
 
 /// A relative lock time value, representing either a block height or time (512 second intervals).
 ///
-/// Used for sequence numbers (`nSequence` in Bitcoin Core and `TxIn::sequence`
+/// Used for sequence numbers (`nSequence` in Bitcoin Core and [`TxIn::sequence`]
 /// in this library) and also for the argument to opcode 'OP_CHECKSEQUENCEVERIFY`.
 ///
 /// ### Note on ordering

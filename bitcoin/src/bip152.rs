@@ -9,14 +9,16 @@ use core::{convert, fmt, mem};
 use std::error;
 
 use hashes::{sha256, siphash24};
-use internals::{impl_array_newtype, ToU64 as _};
+use internals::ToU64 as _;
 use io::{BufRead, Write};
 
-use crate::consensus::encode::{self, Decodable, Encodable, VarInt};
-use crate::internal_macros::{impl_array_newtype_stringify, impl_consensus_encoding};
+use crate::consensus::encode::{self, Decodable, Encodable, ReadExt, WriteExt};
+use crate::internal_macros::{
+    impl_array_newtype, impl_array_newtype_stringify, impl_consensus_encoding,
+};
 use crate::prelude::Vec;
 use crate::transaction::TxIdentifier;
-use crate::{block, Block, BlockHash, Transaction};
+use crate::{block, consensus, Block, BlockHash, Transaction};
 
 /// A BIP-152 error
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,16 +78,17 @@ impl convert::AsRef<Transaction> for PrefilledTransaction {
 impl Encodable for PrefilledTransaction {
     #[inline]
     fn consensus_encode<W: Write + ?Sized>(&self, w: &mut W) -> Result<usize, io::Error> {
-        Ok(VarInt::from(self.idx).consensus_encode(w)? + self.tx.consensus_encode(w)?)
+        Ok(w.emit_compact_size(self.idx)? + self.tx.consensus_encode(w)?)
     }
 }
 
 impl Decodable for PrefilledTransaction {
     #[inline]
     fn consensus_decode<R: BufRead + ?Sized>(r: &mut R) -> Result<Self, encode::Error> {
-        let idx = VarInt::consensus_decode(r)?.0;
-        let idx = u16::try_from(idx)
-            .map_err(|_| encode::Error::ParseFailed("BIP152 prefilled tx index out of bounds"))?;
+        let idx = r.read_compact_size()?;
+        let idx = u16::try_from(idx).map_err(|_| {
+            consensus::parse_failed_error("BIP152 prefilled tx index out of bounds")
+        })?;
         let tx = Transaction::consensus_decode(r)?;
         Ok(PrefilledTransaction { idx, tx })
     }
@@ -111,8 +114,8 @@ impl ShortId {
         // 2. Running SipHash-2-4 with the input being the transaction ID and the keys (k0/k1)
         // set to the first two little-endian 64-bit integers from the above hash, respectively.
         (
-            u64::from_le_bytes(h[0..8].try_into().expect("8 byte slice")),
-            u64::from_le_bytes(h[8..16].try_into().expect("8 byte slice")),
+            u64::from_le_bytes(h.as_byte_array()[0..8].try_into().expect("8 byte slice")),
+            u64::from_le_bytes(h.as_byte_array()[8..16].try_into().expect("8 byte slice")),
         )
     }
 
@@ -124,7 +127,7 @@ impl ShortId {
 
         // 3. Dropping the 2 most significant bytes from the SipHash output to make it 6 bytes.
         let mut id = ShortId([0; 6]);
-        id.0.copy_from_slice(&hash[0..6]);
+        id.0.copy_from_slice(&hash.as_byte_array()[0..6]);
         id
     }
 }
@@ -172,7 +175,7 @@ impl Decodable for HeaderAndShortIds {
         };
         match header_short_ids.short_ids.len().checked_add(header_short_ids.prefilled_txs.len()) {
             Some(x) if x <= u16::MAX.into() => Ok(header_short_ids),
-            _ => Err(encode::Error::ParseFailed("indexes overflowed 16 bits")),
+            _ => Err(consensus::parse_failed_error("indexes overflowed 16 bits")),
         }
     }
 }
@@ -289,10 +292,10 @@ impl Encodable for BlockTransactionsRequest {
     fn consensus_encode<W: Write + ?Sized>(&self, w: &mut W) -> Result<usize, io::Error> {
         let mut len = self.block_hash.consensus_encode(w)?;
         // Manually encode indexes because they are differentially encoded VarInts.
-        len += VarInt(self.indexes.len().to_u64()).consensus_encode(w)?;
+        len += w.emit_compact_size(self.indexes.len())?;
         let mut last_idx = 0;
         for idx in &self.indexes {
-            len += VarInt(*idx - last_idx).consensus_encode(w)?;
+            len += w.emit_compact_size(*idx - last_idx)?;
             last_idx = *idx + 1; // can panic here
         }
         Ok(len)
@@ -305,33 +308,34 @@ impl Decodable for BlockTransactionsRequest {
             block_hash: BlockHash::consensus_decode(r)?,
             indexes: {
                 // Manually decode indexes because they are differentially encoded VarInts.
-                let nb_indexes = VarInt::consensus_decode(r)?.0 as usize;
+                let nb_indexes = r.read_compact_size()? as usize;
 
                 // Since the number of indices ultimately represent transactions,
                 // we can limit the number of indices to the maximum number of
                 // transactions that would be allowed in a vector.
-                let byte_size = (nb_indexes)
+                let byte_size = nb_indexes
                     .checked_mul(mem::size_of::<Transaction>())
-                    .ok_or(encode::Error::ParseFailed("invalid length"))?;
+                    .ok_or(consensus::parse_failed_error("invalid length"))?;
                 if byte_size > encode::MAX_VEC_SIZE {
-                    return Err(encode::Error::OversizedVectorAllocation {
+                    return Err(encode::ParseError::OversizedVectorAllocation {
                         requested: byte_size,
                         max: encode::MAX_VEC_SIZE,
-                    });
+                    }
+                    .into());
                 }
 
                 let mut indexes = Vec::with_capacity(nb_indexes);
                 let mut last_index: u64 = 0;
                 for _ in 0..nb_indexes {
-                    let differential: VarInt = Decodable::consensus_decode(r)?;
-                    last_index = match last_index.checked_add(differential.0) {
+                    let differential = r.read_compact_size()?;
+                    last_index = match last_index.checked_add(differential) {
                         Some(i) => i,
-                        None => return Err(encode::Error::ParseFailed("block index overflow")),
+                        None => return Err(consensus::parse_failed_error("block index overflow")),
                     };
                     indexes.push(last_index);
                     last_index = match last_index.checked_add(1) {
                         Some(i) => i,
-                        None => return Err(encode::Error::ParseFailed("block index overflow")),
+                        None => return Err(consensus::parse_failed_error("block index overflow")),
                     };
                 }
                 indexes
@@ -404,6 +408,7 @@ mod test {
     use crate::consensus::encode::{deserialize, serialize};
     use crate::locktime::absolute;
     use crate::merkle_tree::TxMerkleNode;
+    use crate::transaction::OutPointExt;
     use crate::{
         transaction, Amount, CompactTarget, OutPoint, ScriptBuf, Sequence, TxIn, TxOut, Txid,
         Witness,
@@ -497,7 +502,7 @@ mod test {
             {
                 // test serialization
                 let raw: Vec<u8> = serialize(&BlockTransactionsRequest {
-                    block_hash: BlockHash::all_zeros(),
+                    block_hash: BlockHash::from_byte_array([0; 32]),
                     indexes: testcase.1,
                 });
                 let mut expected_raw: Vec<u8> = [0u8; 32].to_vec();
@@ -520,7 +525,7 @@ mod test {
     #[should_panic] // 'attempt to add with overflow' in consensus_encode()
     fn test_getblocktx_panic_when_encoding_u64_max() {
         serialize(&BlockTransactionsRequest {
-            block_hash: BlockHash::all_zeros(),
+            block_hash: BlockHash::from_byte_array([0; 32]),
             indexes: vec![u64::MAX],
         });
     }

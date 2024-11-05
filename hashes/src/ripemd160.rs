@@ -3,12 +3,10 @@
 //! RIPEMD160 implementation.
 
 use core::cmp;
-use core::ops::Index;
-use core::slice::SliceIndex;
 
-use crate::HashEngine as _;
+use crate::{incomplete_block_len, HashEngine as _};
 
-crate::internal_macros::hash_type! {
+crate::internal_macros::general_hash_type! {
     160,
     false,
     "Output of the RIPEMD160 hash function."
@@ -17,19 +15,19 @@ crate::internal_macros::hash_type! {
 #[cfg(not(hashes_fuzz))]
 fn from_engine(mut e: HashEngine) -> Hash {
     // pad buffer with a single 1-bit then all 0s, until there are exactly 8 bytes remaining
-    let data_len = e.length as u64;
+    let n_bytes_hashed = e.bytes_hashed;
 
     let zeroes = [0; BLOCK_SIZE - 8];
     e.input(&[0x80]);
-    if e.length % BLOCK_SIZE > zeroes.len() {
+    if crate::incomplete_block_len(&e) > zeroes.len() {
         e.input(&zeroes);
     }
-    let pad_length = zeroes.len() - (e.length % BLOCK_SIZE);
+    let pad_length = zeroes.len() - incomplete_block_len(&e);
     e.input(&zeroes[..pad_length]);
-    debug_assert_eq!(e.length % BLOCK_SIZE, zeroes.len());
+    debug_assert_eq!(incomplete_block_len(&e), zeroes.len());
 
-    e.input(&(8 * data_len).to_le_bytes());
-    debug_assert_eq!(e.length % BLOCK_SIZE, 0);
+    e.input(&(8 * n_bytes_hashed).to_le_bytes());
+    debug_assert_eq!(incomplete_block_len(&e), 0);
 
     Hash(e.midstate())
 }
@@ -37,7 +35,7 @@ fn from_engine(mut e: HashEngine) -> Hash {
 #[cfg(hashes_fuzz)]
 fn from_engine(e: HashEngine) -> Hash {
     let mut res = e.midstate();
-    res[0] ^= (e.length & 0xff) as u8;
+    res[0] ^= (e.bytes_hashed & 0xff) as u8;
     Hash(res)
 }
 
@@ -48,7 +46,7 @@ const BLOCK_SIZE: usize = 64;
 pub struct HashEngine {
     buffer: [u8; BLOCK_SIZE],
     h: [u32; 5],
-    length: usize,
+    bytes_hashed: u64,
 }
 
 impl HashEngine {
@@ -56,7 +54,7 @@ impl HashEngine {
     pub const fn new() -> Self {
         Self {
             h: [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0],
-            length: 0,
+            bytes_hashed: 0,
             buffer: [0; BLOCK_SIZE],
         }
     }
@@ -85,9 +83,9 @@ impl Default for HashEngine {
 impl crate::HashEngine for HashEngine {
     const BLOCK_SIZE: usize = 64;
 
-    fn n_bytes_hashed(&self) -> usize { self.length }
+    fn n_bytes_hashed(&self) -> u64 { self.bytes_hashed }
 
-    engine_input_impl!();
+    crate::internal_macros::engine_input_impl!();
 }
 
 #[cfg(feature = "small-hash")]
@@ -479,7 +477,7 @@ mod tests {
             // Hash through high-level API, check hex encoding/decoding
             let hash = ripemd160::Hash::hash(test.input.as_bytes());
             assert_eq!(hash, test.output_str.parse::<ripemd160::Hash>().expect("parse hex"));
-            assert_eq!(hash[..], test.output);
+            assert_eq!(hash.as_byte_array(), &test.output);
             assert_eq!(hash.to_string(), test.output_str);
             assert_eq!(ripemd160::Hash::from_bytes_ref(&test.output), &hash);
             assert_eq!(ripemd160::Hash::from_bytes_mut(&mut test.output), &hash);

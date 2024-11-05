@@ -6,6 +6,8 @@
 
 use core::fmt;
 
+#[cfg(feature = "arbitrary")]
+use arbitrary::{Arbitrary, Unstructured};
 use internals::write_err;
 use io::Write;
 
@@ -45,7 +47,7 @@ impl Signature {
     /// Serializes the signature.
     ///
     /// Note: this allocates on the heap, prefer [`serialize`](Self::serialize) if vec is not needed.
-    pub fn to_bytes(self) -> Vec<u8> {
+    pub fn to_vec(self) -> Vec<u8> {
         let mut ser_sig = self.signature.as_ref().to_vec();
         if self.sighash_type == TapSighashType::Default {
             // default sighash type, don't add extra sighash byte
@@ -54,10 +56,6 @@ impl Signature {
         }
         ser_sig
     }
-
-    /// Serializes the signature.
-    #[deprecated(since = "TBD", note = "Use to_bytes instead")]
-    pub fn to_vec(self) -> Vec<u8> { self.to_bytes() }
 
     /// Serializes the signature to `writer`.
     #[inline]
@@ -132,4 +130,16 @@ impl From<secp256k1::Error> for SigFromSliceError {
 
 impl From<InvalidSighashTypeError> for SigFromSliceError {
     fn from(err: InvalidSighashTypeError) -> Self { Self::SighashType(err) }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> Arbitrary<'a> for Signature {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let arbitrary_bytes: [u8; secp256k1::constants::SCHNORR_SIGNATURE_SIZE] = u.arbitrary()?;
+
+        Ok(Signature {
+            signature: secp256k1::schnorr::Signature::from_slice(&arbitrary_bytes).unwrap(),
+            sighash_type: TapSighashType::arbitrary(u)?,
+        })
+    }
 }

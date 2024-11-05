@@ -28,6 +28,7 @@ use bitcoin::key::UntweakedPublicKey;
 use bitcoin::locktime::absolute;
 use bitcoin::psbt::Input;
 use bitcoin::secp256k1::{Secp256k1, Signing};
+use bitcoin::witness::WitnessExt as _;
 use bitcoin::{
     consensus, transaction, Address, Amount, Network, OutPoint, Psbt, ScriptBuf, Sequence,
     TapLeafHash, TapSighashType, Transaction, TxIn, TxOut, Txid, Witness, XOnlyPublicKey,
@@ -59,11 +60,11 @@ fn get_external_address_xpriv<C: Signing>(
 ) -> Xpriv {
     let derivation_path =
         BIP86_DERIVATION_PATH.into_derivation_path().expect("valid derivation path");
-    let child_xpriv = master_xpriv.derive_priv(secp, &derivation_path);
+    let child_xpriv = master_xpriv.derive_xpriv(secp, &derivation_path);
     let external_index = ChildNumber::ZERO_NORMAL;
     let idx = ChildNumber::from_normal_idx(index).expect("valid index number");
 
-    child_xpriv.derive_priv(secp, &[external_index, idx])
+    child_xpriv.derive_xpriv(secp, &[external_index, idx])
 }
 
 // Derive the internal address xpriv.
@@ -74,11 +75,11 @@ fn get_internal_address_xpriv<C: Signing>(
 ) -> Xpriv {
     let derivation_path =
         BIP86_DERIVATION_PATH.into_derivation_path().expect("valid derivation path");
-    let child_xpriv = master_xpriv.derive_priv(secp, &derivation_path);
+    let child_xpriv = master_xpriv.derive_xpriv(secp, &derivation_path);
     let internal_index = ChildNumber::ONE_NORMAL;
     let idx = ChildNumber::from_normal_idx(index).expect("valid index number");
 
-    child_xpriv.derive_priv(secp, &[internal_index, idx])
+    child_xpriv.derive_xpriv(secp, &[internal_index, idx])
 }
 
 // Get the Taproot Key Origin.
@@ -143,9 +144,9 @@ fn main() {
     let xpriv_change = get_internal_address_xpriv(&secp, master_xpriv, 1);
 
     // Get the PKs
-    let (pk_input_1, _) = Xpub::from_priv(&secp, &xpriv_input_1).public_key.x_only_public_key();
-    let (pk_input_2, _) = Xpub::from_priv(&secp, &xpriv_input_2).public_key.x_only_public_key();
-    let (pk_change, _) = Xpub::from_priv(&secp, &xpriv_change).public_key.x_only_public_key();
+    let (pk_input_1, _) = Xpub::from_xpriv(&secp, &xpriv_input_1).public_key.x_only_public_key();
+    let (pk_input_2, _) = Xpub::from_xpriv(&secp, &xpriv_input_2).public_key.x_only_public_key();
+    let (pk_change, _) = Xpub::from_xpriv(&secp, &xpriv_change).public_key.x_only_public_key();
 
     // Get the Tap Key Origins
     // Map of tap root X-only keys to origin info and leaf hashes contained in it.
@@ -175,7 +176,7 @@ fn main() {
         .map(|(outpoint, _)| TxIn {
             previous_output: outpoint,
             script_sig: ScriptBuf::default(),
-            sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+            sequence: Sequence::ENABLE_LOCKTIME_AND_RBF,
             witness: Witness::default(),
         })
         .collect();

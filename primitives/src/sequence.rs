@@ -3,8 +3,7 @@
 //! Bitcoin transaction input sequence number.
 //!
 //! The sequence field is used for:
-//! - Indicating whether absolute lock-time (specified in `lock_time` field of `Transaction`)
-//!   is enabled.
+//! - Indicating whether absolute lock-time (specified in `lock_time` field of [`Transaction`]) is enabled.
 //! - Indicating and encoding [BIP-68] relative lock-times.
 //! - Indicating whether a transaction opts-in to [BIP-125] replace-by-fee.
 //!
@@ -19,7 +18,6 @@ use core::fmt;
 
 #[cfg(feature = "arbitrary")]
 use arbitrary::{Arbitrary, Unstructured};
-use internals::impl_to_hex_from_lower_hex;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "alloc")]
@@ -29,6 +27,8 @@ use units::parse::{self, PrefixedHexError, UnprefixedHexError};
 
 #[cfg(feature = "alloc")]
 use crate::locktime::relative;
+#[cfg(all(doc, feature = "alloc"))]
+use crate::transaction::Transaction;
 
 /// Bitcoin transaction input sequence number.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -38,18 +38,26 @@ pub struct Sequence(pub u32);
 impl Sequence {
     /// The maximum allowable sequence number.
     ///
-    /// This sequence number disables absolute lock time and replace-by-fee.
+    /// The sequence number that disables replace-by-fee, absolute lock time and relative lock time.
     pub const MAX: Self = Sequence(0xFFFFFFFF);
     /// Zero value sequence.
     ///
     /// This sequence number enables replace-by-fee and absolute lock time.
     pub const ZERO: Self = Sequence(0);
+    /// The sequence number that disables replace-by-fee, absolute lock time and relative lock time.
+    pub const FINAL: Self = Sequence::MAX;
     /// The sequence number that enables absolute lock time but disables replace-by-fee
     /// and relative lock time.
     pub const ENABLE_LOCKTIME_NO_RBF: Self = Sequence::MIN_NO_RBF;
     /// The sequence number that enables replace-by-fee and absolute lock time but
     /// disables relative lock time.
+    #[deprecated(since = "TBD", note = "use `ENABLE_LOCKTIME_AND_RBF` instead")]
     pub const ENABLE_RBF_NO_LOCKTIME: Self = Sequence(0xFFFFFFFD);
+    /// The maximum sequence number that enables replace-by-fee and absolute lock time but
+    /// disables relative lock time.
+    ///
+    /// This sequence number has no meaning other than to enable RBF and the absolute locktime.
+    pub const ENABLE_LOCKTIME_AND_RBF: Self = Sequence(0xFFFFFFFD);
 
     /// The number of bytes that a sequence number contributes to the size of a transaction.
     pub const SIZE: usize = 4; // Serialized length of a u32.
@@ -67,7 +75,7 @@ impl Sequence {
     /// BIP-68 relative lock time type flag mask.
     const LOCK_TYPE_MASK: u32 = 0x00400000;
 
-    /// Returns `true` if the sequence number enables absolute lock-time (`Transaction::lock_time`).
+    /// Returns `true` if the sequence number enables absolute lock-time ([`Transaction::lock_time`]).
     #[inline]
     pub fn enables_absolute_lock_time(&self) -> bool { *self != Sequence::MAX }
 
@@ -223,9 +231,10 @@ impl fmt::Display for Sequence {
 impl fmt::LowerHex for Sequence {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { fmt::LowerHex::fmt(&self.0, f) }
 }
-impl_to_hex_from_lower_hex!(Sequence, |sequence: &Sequence| 8 - sequence.0.leading_zeros()
-    as usize
-    / 4);
+#[cfg(feature = "alloc")]
+internals::impl_to_hex_from_lower_hex!(Sequence, |sequence: &Sequence| {
+    8 - sequence.0.leading_zeros() as usize / 4
+});
 
 impl fmt::UpperHex for Sequence {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { fmt::UpperHex::fmt(&self.0, f) }
@@ -242,9 +251,69 @@ impl fmt::Debug for Sequence {
 units::impl_parse_str_from_int_infallible!(Sequence, u32, from_consensus);
 
 #[cfg(feature = "arbitrary")]
+#[cfg(feature = "alloc")]
 impl<'a> Arbitrary<'a> for Sequence {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let s = u32::arbitrary(u)?;
-        Ok(Sequence(s))
+        // Equally weight the cases of meaningful sequence numbers
+        let choice = u.int_in_range(0..=8)?;
+        match choice {
+            0 => Ok(Sequence::MAX),
+            1 => Ok(Sequence::ZERO),
+            2 => Ok(Sequence::MIN_NO_RBF),
+            3 => Ok(Sequence::ENABLE_LOCKTIME_AND_RBF),
+            4 => Ok(Sequence::from_consensus(relative::Height::MIN.to_consensus_u32())),
+            5 => Ok(Sequence::from_consensus(relative::Height::MAX.to_consensus_u32())),
+            6 => Ok(Sequence::from_consensus(relative::Time::MIN.to_consensus_u32())),
+            7 => Ok(Sequence::from_consensus(relative::Time::MAX.to_consensus_u32())),
+            _ => Ok(Sequence(u.arbitrary()?)),
+        }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+#[cfg(not(feature = "alloc"))]
+impl<'a> Arbitrary<'a> for Sequence {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        // Equally weight the cases of meaningful sequence numbers
+        let choice = u.int_in_range(0..=4)?;
+        match choice {
+            0 => Ok(Sequence::MAX),
+            1 => Ok(Sequence::ZERO),
+            2 => Ok(Sequence::MIN_NO_RBF),
+            3 => Ok(Sequence::ENABLE_LOCKTIME_AND_RBF),
+            _ => Ok(Sequence(u.arbitrary()?)),
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "alloc")]
+mod tests {
+    use super::*;
+
+    const MAXIMUM_ENCODABLE_SECONDS: u32 = u16::MAX as u32 * 512;
+
+    #[test]
+    fn from_seconds_floor_success() {
+        let expected = Sequence::from_hex("0x0040ffff").unwrap();
+        let actual = Sequence::from_seconds_floor(MAXIMUM_ENCODABLE_SECONDS + 511).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn from_seconds_floor_causes_overflow_error() {
+        assert!(Sequence::from_seconds_floor(MAXIMUM_ENCODABLE_SECONDS + 512).is_err());
+    }
+
+    #[test]
+    fn from_seconds_ceil_success() {
+        let expected = Sequence::from_hex("0x0040ffff").unwrap();
+        let actual = Sequence::from_seconds_ceil(MAXIMUM_ENCODABLE_SECONDS - 511).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn from_seconds_ceil_causes_overflow_error() {
+        assert!(Sequence::from_seconds_ceil(MAXIMUM_ENCODABLE_SECONDS + 1).is_err());
     }
 }

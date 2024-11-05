@@ -2,15 +2,11 @@
 
 //! Provides [`Height`] and [`Time`] types used by the `rust-bitcoin` `absolute::LockTime` type.
 
-#[cfg(feature = "alloc")]
-use alloc::{boxed::Box, string::String};
 use core::fmt;
 
-use internals::write_err;
+use internals::error::InputString;
 
-#[cfg(feature = "alloc")]
-use crate::parse;
-use crate::parse::ParseIntError;
+use crate::parse::{self, ParseIntError};
 
 /// The Threshold for deciding whether a lock time value is a height or a time (see [Bitcoin Core]).
 ///
@@ -62,7 +58,7 @@ impl Height {
     /// assert_eq!(height.to_consensus_u32(), h);
     /// ```
     #[inline]
-    pub fn from_consensus(n: u32) -> Result<Height, ConversionError> {
+    pub const fn from_consensus(n: u32) -> Result<Height, ConversionError> {
         if is_block_height(n) {
             Ok(Self(n))
         } else {
@@ -72,7 +68,7 @@ impl Height {
 
     /// Converts this [`Height`] to its inner `u32` value.
     #[inline]
-    pub fn to_consensus_u32(self) -> u32 { self.0 }
+    pub const fn to_consensus_u32(self) -> u32 { self.0 }
 }
 
 impl fmt::Display for Height {
@@ -158,7 +154,7 @@ impl Time {
     /// assert_eq!(time.to_consensus_u32(), t);
     /// ```
     #[inline]
-    pub fn from_consensus(n: u32) -> Result<Time, ConversionError> {
+    pub const fn from_consensus(n: u32) -> Result<Time, ConversionError> {
         if is_block_time(n) {
             Ok(Self(n))
         } else {
@@ -168,7 +164,7 @@ impl Time {
 
     /// Converts this [`Time`] to its inner `u32` value.
     #[inline]
-    pub fn to_consensus_u32(self) -> u32 { self.0 }
+    pub const fn to_consensus_u32(self) -> u32 { self.0 }
 }
 
 impl fmt::Display for Time {
@@ -204,7 +200,7 @@ pub struct ParseTimeError(ParseError);
 
 impl fmt::Display for ParseTimeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.display(f, "block height", LOCK_TIME_THRESHOLD, u32::MAX)
+        self.0.display(f, "block time", LOCK_TIME_THRESHOLD, u32::MAX)
     }
 }
 
@@ -221,7 +217,7 @@ impl From<ParseError> for ParseTimeError {
 fn parser<T, E, S, F>(f: F) -> impl FnOnce(S) -> Result<T, E>
 where
     E: From<ParseError>,
-    S: AsRef<str> + Into<String>,
+    S: AsRef<str> + Into<InputString>,
     F: FnOnce(u32) -> Result<T, ConversionError>,
 {
     move |s| {
@@ -234,7 +230,7 @@ where
 fn parse_hex<T, E, S, F>(s: S, f: F) -> Result<T, E>
 where
     E: From<ParseError>,
-    S: AsRef<str> + Into<String>,
+    S: AsRef<str> + Into<InputString>,
     F: FnOnce(u32) -> Result<T, ConversionError>,
 {
     let n = i64::from_str_radix(parse::hex_remove_optional_prefix(s.as_ref()), 16)
@@ -244,10 +240,10 @@ where
 }
 
 /// Returns true if `n` is a block height i.e., less than 500,000,000.
-pub fn is_block_height(n: u32) -> bool { n < LOCK_TIME_THRESHOLD }
+pub const fn is_block_height(n: u32) -> bool { n < LOCK_TIME_THRESHOLD }
 
 /// Returns true if `n` is a UNIX timestamp i.e., greater than or equal to 500,000,000.
-pub fn is_block_time(n: u32) -> bool { n >= LOCK_TIME_THRESHOLD }
+pub const fn is_block_time(n: u32) -> bool { n >= LOCK_TIME_THRESHOLD }
 
 /// An error that occurs when converting a `u32` to a lock time variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,10 +257,10 @@ pub struct ConversionError {
 
 impl ConversionError {
     /// Constructs a `ConversionError` from an invalid `n` when expecting a height value.
-    fn invalid_height(n: u32) -> Self { Self { unit: LockTimeUnit::Blocks, input: n } }
+    const fn invalid_height(n: u32) -> Self { Self { unit: LockTimeUnit::Blocks, input: n } }
 
     /// Constructs a `ConversionError` from an invalid `n` when expecting a time value.
-    fn invalid_time(n: u32) -> Self { Self { unit: LockTimeUnit::Seconds, input: n } }
+    const fn invalid_time(n: u32) -> Self { Self { unit: LockTimeUnit::Seconds, input: n } }
 }
 
 impl fmt::Display for ConversionError {
@@ -301,7 +297,7 @@ impl fmt::Display for LockTimeUnit {
 /// Internal - common representation for height and time.
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum ParseError {
-    InvalidInteger { source: core::num::ParseIntError, input: String },
+    ParseInt(ParseIntError),
     // unit implied by outer type
     // we use i64 to have nicer messages for negative values
     Conversion(i64),
@@ -310,8 +306,10 @@ enum ParseError {
 internals::impl_from_infallible!(ParseError);
 
 impl ParseError {
-    fn invalid_int<S: Into<String>>(s: S) -> impl FnOnce(core::num::ParseIntError) -> Self {
-        move |source| Self::InvalidInteger { source, input: s.into() }
+    fn invalid_int<S: Into<InputString>>(s: S) -> impl FnOnce(core::num::ParseIntError) -> Self {
+        move |source| {
+            Self::ParseInt(ParseIntError { input: s.into(), bits: 32, is_signed: true, source })
+        }
     }
 
     fn display(
@@ -326,14 +324,32 @@ impl ParseError {
         use ParseError::*;
 
         match self {
-            InvalidInteger { source, input } if *source.kind() == IntErrorKind::PosOverflow => {
-                write!(f, "{} {} is above limit {}", subject, input, upper_bound)
+            ParseInt(ParseIntError { input, bits: _, is_signed: _, source })
+                if *source.kind() == IntErrorKind::PosOverflow =>
+            {
+                // Outputs "failed to parse <input_string> as absolute Height/Time (<subject> is above limit <upper_bound>)"
+                write!(
+                    f,
+                    "{} ({} is above limit {})",
+                    input.display_cannot_parse("absolute Height/Time"),
+                    subject,
+                    upper_bound
+                )
             }
-            InvalidInteger { source, input } if *source.kind() == IntErrorKind::NegOverflow => {
-                write!(f, "{} {} is below limit {}", subject, input, lower_bound)
+            ParseInt(ParseIntError { input, bits: _, is_signed: _, source })
+                if *source.kind() == IntErrorKind::NegOverflow =>
+            {
+                // Outputs "failed to parse <input_string> as absolute Height/Time (<subject> is below limit <lower_bound>)"
+                write!(
+                    f,
+                    "{} ({} is below limit {})",
+                    input.display_cannot_parse("absolute Height/Time"),
+                    subject,
+                    lower_bound
+                )
             }
-            InvalidInteger { source, input } => {
-                write_err!(f, "failed to parse {} as {}", input, subject; source)
+            ParseInt(ParseIntError { input, bits: _, is_signed: _, source: _ }) => {
+                write!(f, "{} ({})", input.display_cannot_parse("absolute Height/Time"), subject)
             }
             Conversion(value) if *value < i64::from(lower_bound) => {
                 write!(f, "{} {} is below limit {}", subject, value, lower_bound)
@@ -352,17 +368,15 @@ impl ParseError {
         use ParseError::*;
 
         match self {
-            InvalidInteger { source, .. } if *source.kind() == IntErrorKind::PosOverflow => None,
-            InvalidInteger { source, .. } if *source.kind() == IntErrorKind::NegOverflow => None,
-            InvalidInteger { source, .. } => Some(source),
+            ParseInt(ParseIntError { source, .. })
+                if *source.kind() == IntErrorKind::PosOverflow =>
+                None,
+            ParseInt(ParseIntError { source, .. })
+                if *source.kind() == IntErrorKind::NegOverflow =>
+                None,
+            ParseInt(ParseIntError { source, .. }) => Some(source),
             Conversion(_) => None,
         }
-    }
-}
-
-impl From<ParseIntError> for ParseError {
-    fn from(value: ParseIntError) -> Self {
-        Self::InvalidInteger { source: value.source, input: value.input }
     }
 }
 

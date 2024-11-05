@@ -9,7 +9,8 @@ use crate::script;
 
 #[rustfmt::skip]                // Keep public re-exports separate.
 #[doc(inline)]
-pub use self::primitive::*;
+// This is not the usual re-export, `primitive` here is an code audit thing.
+pub use self::primitive::{PushBytes, PushBytesBuf};
 
 /// This module only contains required operations so that outside functions wouldn't accidentally
 /// break invariants. Therefore auditing this module should be sufficient.
@@ -46,32 +47,25 @@ mod primitive {
     impl PushBytes {
         /// Creates `&PushBytes` without checking the length.
         ///
-        /// # Safety
-        ///
         /// The caller is responsible for checking that the length is less than the 2^32.
-        unsafe fn from_slice_unchecked(bytes: &[u8]) -> &Self {
-            // SAFETY: The caller must guarantee that bytes.len() < 2^32.
-            // If that is the case the conversion is sound because &[u8] and &PushBytes
+        fn from_slice_unchecked(bytes: &[u8]) -> &Self {
+            // SAFETY: The conversion is sound because &[u8] and &PushBytes
             // have the same layout (because of #[repr(transparent)] on PushBytes).
-            &*(bytes as *const [u8] as *const PushBytes)
+            unsafe { &*(bytes as *const [u8] as *const PushBytes) }
         }
 
         /// Creates `&mut PushBytes` without checking the length.
         ///
-        /// # Safety
-        ///
         /// The caller is responsible for checking that the length is less than the 2^32.
-        unsafe fn from_mut_slice_unchecked(bytes: &mut [u8]) -> &mut Self {
-            // SAFETY: The caller must guarantee that bytes.len() < 2^32.
-            // If that is the case the conversion is sound because &mut [u8] and &mut PushBytes
+        fn from_mut_slice_unchecked(bytes: &mut [u8]) -> &mut Self {
+            // SAFETY: The conversion is sound because &mut [u8] and &mut PushBytes
             // have the same layout (because of #[repr(transparent)] on PushBytes).
-            &mut *(bytes as *mut [u8] as *mut PushBytes)
+            unsafe { &mut *(bytes as *mut [u8] as *mut PushBytes) }
         }
 
         /// Creates an empty `&PushBytes`.
         pub fn empty() -> &'static Self {
-            // SAFETY: 0 < 2^32.
-            unsafe { Self::from_slice_unchecked(&[]) }
+            Self::from_slice_unchecked(&[])
         }
 
         /// Returns the underlying bytes.
@@ -90,10 +84,7 @@ mod primitive {
                     #[inline]
                     #[track_caller]
                     fn index(&self, index: $type) -> &Self::Output {
-                        // SAFETY: Slicing can not make slices longer.
-                        unsafe {
-                            Self::from_slice_unchecked(&self.0[index])
-                        }
+                        Self::from_slice_unchecked(&self.0[index])
                     }
                 }
 
@@ -101,10 +92,7 @@ mod primitive {
                     #[inline]
                     #[track_caller]
                     fn index_mut(&mut self, index: $type) -> &mut Self::Output {
-                        // SAFETY: Slicing can not make slices longer.
-                        unsafe {
-                            Self::from_mut_slice_unchecked(&mut self.0[index])
-                        }
+                        Self::from_mut_slice_unchecked(&mut self.0[index])
                     }
                 }
             )*
@@ -140,8 +128,7 @@ mod primitive {
 
         fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
             check_limit(bytes.len())?;
-            // SAFETY: We've just checked the length.
-            Ok(unsafe { PushBytes::from_slice_unchecked(bytes) })
+            Ok(PushBytes::from_slice_unchecked(bytes))
         }
     }
 
@@ -150,8 +137,7 @@ mod primitive {
 
         fn try_from(bytes: &'a mut [u8]) -> Result<Self, Self::Error> {
             check_limit(bytes.len())?;
-            // SAFETY: We've just checked the length.
-            Ok(unsafe { PushBytes::from_mut_slice_unchecked(bytes) })
+            Ok(PushBytes::from_mut_slice_unchecked(bytes))
         }
     }
 
@@ -162,16 +148,15 @@ mod primitive {
                     fn from(bytes: &'a [u8; $len]) -> Self {
                         // Check that the macro wasn't called with a wrong number.
                         const _: () = [(); 1][($len >= 0x100000000u64) as usize];
-                        // SAFETY: We know the size of array statically and we checked macro input.
-                        unsafe { PushBytes::from_slice_unchecked(bytes) }
+                        PushBytes::from_slice_unchecked(bytes)
                     }
                 }
 
                 impl<'a> From<&'a mut [u8; $len]> for &'a mut PushBytes {
                     fn from(bytes: &'a mut [u8; $len]) -> Self {
                         // Macro check already above, no need to duplicate.
-                        // SAFETY: We know the size of array statically and we checked macro input.
-                        unsafe { PushBytes::from_mut_slice_unchecked(bytes) }
+                        // We know the size of array statically and we checked macro input.
+                        PushBytes::from_mut_slice_unchecked(bytes)
                     }
                 }
 
@@ -202,12 +187,12 @@ mod primitive {
         }
     }
 
-    // Sizes up to 73 to support all pubkey and signature sizes
+    // Sizes up to 76 to support all pubkey and signature sizes
     from_array! {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
         25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
         48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70,
-        71, 72, 73,
+        71, 72, 73, 74, 75, 76
     }
 
     /// Owned, growable counterpart to `PushBytes`.
@@ -272,13 +257,13 @@ mod primitive {
         /// Extracts `PushBytes` slice
         pub fn as_push_bytes(&self) -> &PushBytes {
             // length guaranteed by our invariant
-            unsafe { PushBytes::from_slice_unchecked(&self.0) }
+            PushBytes::from_slice_unchecked(&self.0)
         }
 
         /// Extracts mutable `PushBytes` slice
         pub fn as_mut_push_bytes(&mut self) -> &mut PushBytes {
             // length guaranteed by our invariant
-            unsafe { PushBytes::from_mut_slice_unchecked(&mut self.0) }
+            PushBytes::from_mut_slice_unchecked(&mut self.0)
         }
 
         /// Accesses inner `Vec` - provided for `super` to impl other methods.
@@ -421,7 +406,8 @@ impl PushBytesErrorReport for core::convert::Infallible {
     fn input_len(&self) -> usize { match *self {} }
 }
 
-pub use error::*;
+#[doc(inline)]
+pub use error::PushBytesError;
 
 #[cfg(any(target_pointer_width = "16", target_pointer_width = "32"))]
 mod error {

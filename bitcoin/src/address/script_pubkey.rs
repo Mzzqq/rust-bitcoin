@@ -70,8 +70,8 @@ define_extension_trait! {
         fn p2wpkh_script_code(&self) -> Option<ScriptBuf> {
             if self.is_p2wpkh() {
                 // The `self` script is 0x00, 0x14, <pubkey_hash>
-                let bytes = &self.as_bytes()[2..];
-                let wpkh = WPubkeyHash::from_slice(bytes).expect("length checked in is_p2wpkh()");
+                let bytes = <[u8; 20]>::try_from(&self.as_bytes()[2..]).expect("length checked in is_p2wpkh()");
+                let wpkh = WPubkeyHash::from_byte_array(bytes);
                 Some(script::p2wpkh_script_code(wpkh))
             } else {
                 None
@@ -193,6 +193,13 @@ pub(super) fn new_witness_program_unchecked<T: AsRef<PushBytes>>(
     // In segwit v0, the program must be 20 or 32 bytes long.
     debug_assert!(version != WitnessVersion::V0 || program.len() == 20 || program.len() == 32);
     Builder::new().push_opcode(version.into()).push_slice(program).into_script()
+}
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::Script {}
+    impl Sealed for super::ScriptBuf {}
+    impl Sealed for super::Builder {}
 }
 
 #[cfg(test)]

@@ -10,7 +10,8 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSoc
 
 use io::{BufRead, Read, Write};
 
-use crate::consensus::encode::{self, Decodable, Encodable, ReadExt, VarInt, WriteExt};
+use crate::consensus;
+use crate::consensus::encode::{self, Decodable, Encodable, ReadExt, WriteExt};
 use crate::p2p::ServiceFlags;
 
 /// A message which can be sent on the Bitcoin network
@@ -146,11 +147,7 @@ impl Encodable for AddrV2 {
             network: u8,
             bytes: &[u8],
         ) -> Result<usize, io::Error> {
-            let len = network.consensus_encode(w)?
-                + VarInt::from(bytes.len()).consensus_encode(w)?
-                + bytes.len();
-            w.emit_slice(bytes)?;
-            Ok(len)
+            Ok(network.consensus_encode(w)? + encode::consensus_encode_with_size(bytes, w)?)
         }
         Ok(match *self {
             AddrV2::Ipv4(ref addr) => encode_addr(w, 1, &addr.octets())?,
@@ -167,30 +164,30 @@ impl Encodable for AddrV2 {
 impl Decodable for AddrV2 {
     fn consensus_decode<R: BufRead + ?Sized>(r: &mut R) -> Result<Self, encode::Error> {
         let network_id = u8::consensus_decode(r)?;
-        let len = VarInt::consensus_decode(r)?.0;
+        let len = r.read_compact_size()?;
         if len > 512 {
-            return Err(encode::Error::ParseFailed("IP must be <= 512 bytes"));
+            return Err(consensus::parse_failed_error("IP must be <= 512 bytes"));
         }
         Ok(match network_id {
             1 => {
                 if len != 4 {
-                    return Err(encode::Error::ParseFailed("invalid IPv4 address"));
+                    return Err(consensus::parse_failed_error("invalid IPv4 address"));
                 }
                 let addr: [u8; 4] = Decodable::consensus_decode(r)?;
                 AddrV2::Ipv4(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]))
             }
             2 => {
                 if len != 16 {
-                    return Err(encode::Error::ParseFailed("invalid IPv6 address"));
+                    return Err(consensus::parse_failed_error("invalid IPv6 address"));
                 }
                 let addr: [u16; 8] = read_be_address(r)?;
                 if addr[0..3] == ONION {
-                    return Err(encode::Error::ParseFailed(
+                    return Err(consensus::parse_failed_error(
                         "OnionCat address sent with IPv6 network id",
                     ));
                 }
                 if addr[0..6] == [0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xFFFF] {
-                    return Err(encode::Error::ParseFailed(
+                    return Err(consensus::parse_failed_error(
                         "IPV4 wrapped address sent with IPv6 network id",
                     ));
                 }
@@ -200,33 +197,33 @@ impl Decodable for AddrV2 {
             }
             3 => {
                 if len != 10 {
-                    return Err(encode::Error::ParseFailed("invalid TorV2 address"));
+                    return Err(consensus::parse_failed_error("invalid TorV2 address"));
                 }
                 let id = Decodable::consensus_decode(r)?;
                 AddrV2::TorV2(id)
             }
             4 => {
                 if len != 32 {
-                    return Err(encode::Error::ParseFailed("invalid TorV3 address"));
+                    return Err(consensus::parse_failed_error("invalid TorV3 address"));
                 }
                 let pubkey = Decodable::consensus_decode(r)?;
                 AddrV2::TorV3(pubkey)
             }
             5 => {
                 if len != 32 {
-                    return Err(encode::Error::ParseFailed("invalid I2P address"));
+                    return Err(consensus::parse_failed_error("invalid I2P address"));
                 }
                 let hash = Decodable::consensus_decode(r)?;
                 AddrV2::I2p(hash)
             }
             6 => {
                 if len != 16 {
-                    return Err(encode::Error::ParseFailed("invalid CJDNS address"));
+                    return Err(consensus::parse_failed_error("invalid CJDNS address"));
                 }
                 let addr: [u16; 8] = read_be_address(r)?;
                 // check the first byte for the CJDNS marker
                 if addr[0] >> 8 != 0xFC {
-                    return Err(encode::Error::ParseFailed("invalid CJDNS address"));
+                    return Err(consensus::parse_failed_error("invalid CJDNS address"));
                 }
                 AddrV2::Cjdns(Ipv6Addr::new(
                     addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7],
@@ -272,7 +269,7 @@ impl Encodable for AddrV2Message {
     fn consensus_encode<W: Write + ?Sized>(&self, w: &mut W) -> Result<usize, io::Error> {
         let mut len = 0;
         len += self.time.consensus_encode(w)?;
-        len += VarInt(self.services.to_u64()).consensus_encode(w)?;
+        len += w.emit_compact_size(self.services.to_u64())?;
         len += self.addr.consensus_encode(w)?;
 
         w.write_all(&self.port.to_be_bytes())?;
@@ -286,7 +283,7 @@ impl Decodable for AddrV2Message {
     fn consensus_decode<R: BufRead + ?Sized>(r: &mut R) -> Result<Self, encode::Error> {
         Ok(AddrV2Message {
             time: Decodable::consensus_decode(r)?,
-            services: ServiceFlags::from(VarInt::consensus_decode(r)?.0),
+            services: ServiceFlags::from(r.read_compact_size()?),
             addr: Decodable::consensus_decode(r)?,
             port: u16::swap_bytes(Decodable::consensus_decode(r)?),
         })

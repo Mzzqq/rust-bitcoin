@@ -94,7 +94,7 @@ fn psbt_sign_taproot() {
         //
         let keystore = Keystore {
             mfp: mfp.parse::<Fingerprint>().unwrap(),
-            sk: PrivateKey::new(kp.secret_key(), Network::Testnet),
+            sk: PrivateKey::new(kp.secret_key(), Network::Testnet(bitcoin::TestnetVersion::V3)),
         };
         let _ = psbt_key_path_spend.sign(&keystore, secp);
 
@@ -124,7 +124,7 @@ fn psbt_sign_taproot() {
 
         let keystore = Keystore {
             mfp: mfp.parse::<Fingerprint>().unwrap(),
-            sk: PrivateKey::new(kp.secret_key(), Network::Testnet),
+            sk: PrivateKey::new(kp.secret_key(), Network::Testnet(bitcoin::TestnetVersion::V3)),
         };
 
         //
@@ -195,7 +195,7 @@ fn create_taproot_tree(
 
 fn create_p2tr_address(tree: TaprootSpendInfo) -> Address {
     let output_key = tree.output_key();
-    Address::p2tr_tweaked(output_key, Network::Testnet)
+    Address::p2tr_tweaked(output_key, Network::Testnet(bitcoin::TestnetVersion::V3))
 }
 
 fn create_psbt_for_taproot_key_path_spend(
@@ -343,7 +343,7 @@ fn finalize_psbt_for_script_path_spend(mut psbt: Psbt) -> Psbt {
             script_witness.push(signature.to_vec());
         }
         for (control_block, (script, _)) in input.tap_scripts.iter() {
-            script_witness.push(script.to_bytes());
+            script_witness.push(script.to_vec());
             script_witness.push(control_block.serialize());
         }
         input.final_script_witness = Some(script_witness);

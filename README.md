@@ -52,6 +52,13 @@ are no plans to do so. Of course, patches to fix specific consensus incompatibil
 16-bit pointer sizes are not supported and we can't promise they will be. If you care about them
 please let us know, so we can know how large the interest is and possibly decide to support them.
 
+### Semver compliance
+
+We try hard to maintain strict semver compliance with our releases. This codebase includes some
+public functions marked unstable (e.g., `pub fn foo__unstable()`). These functions do not adhere to
+semver rules; use them at your own discretion.
+
+
 ## Documentation
 
 Currently can be found on [docs.rs/bitcoin](https://docs.rs/bitcoin/). Patches to add usage examples
@@ -69,7 +76,7 @@ For more information please see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Minimum Supported Rust Version (MSRV)
 
-This library should always compile with any combination of features on **Rust 1.63.0**.
+This library should compile with any combination of features on **Rust 1.63.0**.
 
 Use `Cargo-minimal.lock` to build the MSRV by copying to `Cargo.lock` and building.
 
@@ -202,9 +209,14 @@ Our code is public domain so by all means fork it and go wild :)
 
 Release notes are done per crate, see:
 
-- [bitcoin CHANGELOG](bitcoin/CHANGELOG.md)
-- [hashes CHANGELOG](hashes/CHANGELOG.md)
-- [internals CHANGELOG](internals/CHANGELOG.md)
+- [`bitcoin` CHANGELOG](bitcoin/CHANGELOG.md)
+- [`addresses` CHANGELOG](addresses/CHANGELOG.md)
+- [`base58` CHANGELOG](base58/CHANGELOG.md)
+- [`hashes` CHANGELOG](hashes/CHANGELOG.md)
+- [`internals` CHANGELOG](internals/CHANGELOG.md)
+- [`io` CHANGELOG](io/CHANGELOG.md)
+- [`primitives` CHANGELOG](primitives/CHANGELOG.md)
+- [`units` CHANGELOG](units/CHANGELOG.md)
 
 
 ## Licensing
