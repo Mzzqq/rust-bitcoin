@@ -22,7 +22,9 @@ fn hex_psbt(s: &str) -> Psbt {
 }
 
 #[track_caller]
-fn hex_script(s: &str) -> ScriptBuf { ScriptBuf::from_hex(s).expect("valid hex digits") }
+fn hex_script(s: &str) -> ScriptBuf {
+    ScriptBuf::from_hex_no_length_prefix(s).expect("valid hex digits")
+}
 
 #[test]
 fn bip174_psbt_workflow() {
@@ -120,7 +122,7 @@ fn build_extended_private_key() -> Xpriv {
     let xpriv = extended_private_key.parse::<Xpriv>().unwrap();
 
     let sk = PrivateKey::from_wif(seed).unwrap();
-    let seeded = Xpriv::new_master(NetworkKind::Test, &sk.inner.secret_bytes()).unwrap();
+    let seeded = Xpriv::new_master(NetworkKind::Test, &sk.inner.secret_bytes());
     assert_eq!(xpriv, seeded);
 
     xpriv
@@ -181,13 +183,13 @@ fn create_transaction() -> Transaction {
             TxOut {
                 value: Amount::from_str_in(output_0.amount, Denomination::Bitcoin)
                     .expect("failed to parse amount"),
-                script_pubkey: ScriptBuf::from_hex(output_0.script_pubkey)
+                script_pubkey: ScriptBuf::from_hex_no_length_prefix(output_0.script_pubkey)
                     .expect("failed to parse script"),
             },
             TxOut {
                 value: Amount::from_str_in(output_1.amount, Denomination::Bitcoin)
                     .expect("failed to parse amount"),
-                script_pubkey: ScriptBuf::from_hex(output_1.script_pubkey)
+                script_pubkey: ScriptBuf::from_hex_no_length_prefix(output_1.script_pubkey)
                     .expect("failed to parse script"),
             },
         ],
@@ -315,7 +317,8 @@ fn parse_and_verify_keys(
 
         let path =
             derivation_path.into_derivation_path().expect("failed to convert derivation path");
-        let derived_priv = ext_priv.derive_xpriv(secp, &path).to_private_key();
+        let derived_priv =
+            ext_priv.derive_xpriv(secp, &path).expect("derivation path too long").to_private_key();
         assert_eq!(wif_priv, derived_priv);
         let derived_pub = derived_priv.public_key(secp);
         key_map.insert(derived_pub, derived_priv);

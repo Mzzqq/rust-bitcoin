@@ -9,12 +9,11 @@ use hashes::{hash160, ripemd160, sha256, sha256d};
 use internals::compact_size;
 #[allow(unused)] // MSRV polyfill
 use internals::slice::SliceExt;
-use secp256k1::XOnlyPublicKey;
 
 use super::map::{Input, Map, Output, PsbtSighashType};
 use crate::bip32::{ChildNumber, Fingerprint, KeySource};
 use crate::consensus::encode::{self, deserialize_partial, serialize, Decodable, Encodable};
-use crate::crypto::key::PublicKey;
+use crate::crypto::key::{PublicKey, XOnlyPublicKey};
 use crate::crypto::{ecdsa, taproot};
 use crate::io::Write;
 use crate::prelude::{DisplayHex, String, Vec};
@@ -370,7 +369,7 @@ impl Serialize for TapTree {
             // safe to cast from usize to u8
             buf.push(leaf_info.merkle_branch().len() as u8);
             buf.push(leaf_info.version().to_consensus());
-            leaf_info.script().consensus_encode(&mut buf).expect("Vecs dont err");
+            leaf_info.script().consensus_encode(&mut buf).expect("Vecs don't err");
         }
         buf
     }
@@ -414,7 +413,7 @@ mod tests {
         let mut val = opcode;
         let mut builder = TaprootBuilder::new();
         for depth in depth_map {
-            let script = ScriptBuf::from_hex(&format!("{:02x}", val)).unwrap();
+            let script = ScriptBuf::from_hex_no_length_prefix(&format!("{:02x}", val)).unwrap();
             builder = builder.add_leaf(*depth, script).unwrap();
             let (new_val, _) = val.overflowing_add(1);
             val = new_val;
@@ -429,7 +428,7 @@ mod tests {
         builder = builder
             .add_leaf_with_ver(
                 3,
-                ScriptBuf::from_hex("b9").unwrap(),
+                ScriptBuf::from_hex_no_length_prefix("b9").unwrap(),
                 LeafVersion::from_consensus(0xC2).unwrap(),
             )
             .unwrap();
@@ -443,7 +442,7 @@ mod tests {
         builder = builder
             .add_leaf_with_ver(
                 3,
-                ScriptBuf::from_hex("b9").unwrap(),
+                ScriptBuf::from_hex_no_length_prefix("b9").unwrap(),
                 LeafVersion::from_consensus(0xC2).unwrap(),
             )
             .unwrap();

@@ -49,11 +49,12 @@ define_extension_trait! {
 
         /// Computes P2TR output with a given internal key and a single script spending path equal to
         /// the current script, assuming that the script is a Tapscript.
-        fn to_p2tr<C: Verification>(
+        fn to_p2tr<C: Verification, K: Into<UntweakedPublicKey>>(
             &self,
             secp: &Secp256k1<C>,
-            internal_key: UntweakedPublicKey,
+            internal_key: K,
         ) -> ScriptBuf {
+            let internal_key = internal_key.into();
             let leaf_hash = self.tapscript_leaf_hash();
             let merkle_root = TapNodeHash::from(leaf_hash);
             ScriptBuf::new_p2tr(secp, internal_key, Some(merkle_root))
@@ -157,11 +158,12 @@ define_extension_trait! {
 
         /// Generates P2TR for script spending path using an internal public key and some optional
         /// script tree Merkle root.
-        fn new_p2tr<C: Verification>(
+        fn new_p2tr<C: Verification, K: Into<UntweakedPublicKey>>(
             secp: &Secp256k1<C>,
-            internal_key: UntweakedPublicKey,
+            internal_key: K,
             merkle_root: Option<TapNodeHash>,
         ) -> Self {
+            let internal_key = internal_key.into();
             let (output_key, _) = internal_key.tap_tweak(secp, merkle_root);
             // output key is 32 bytes long, so it's safe to use `new_witness_program_unchecked` (Segwitv1)
             new_witness_program_unchecked(WitnessVersion::V1, output_key.serialize())
@@ -198,7 +200,7 @@ pub(super) fn new_witness_program_unchecked<T: AsRef<PushBytes>>(
 ) -> ScriptBuf {
     let program = program.as_ref();
     debug_assert!(program.len() >= 2 && program.len() <= 40);
-    // In SegWit v0, the program must be either 20 (P2WPKH) bytes or 32 (P2WSH) bytes long
+    // In SegWit v0, the program must be either 20 bytes (P2WPKH) or 32 bytes (P2WSH) long.
     debug_assert!(version != WitnessVersion::V0 || program.len() == 20 || program.len() == 32);
     Builder::new().push_opcode(version.into()).push_slice(program).into_script()
 }

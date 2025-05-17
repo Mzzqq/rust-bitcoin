@@ -16,6 +16,8 @@
 #![warn(missing_docs)]
 #![warn(deprecated_in_future)]
 #![doc(test(attr(warn(unused))))]
+// Exclude lints we don't think are valuable.
+#![allow(clippy::uninlined_format_args)] // Allow `format!("{}", x)`instead of enforcing `format!("{x}")`
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -50,11 +52,15 @@ pub mod witness;
 #[doc(inline)]
 pub use units::{
     amount::{self, Amount, SignedAmount},
-    block::{BlockHeight, BlockInterval},
+    block::{BlockHeight, BlockHeightInterval, BlockMtp, BlockMtpInterval},
     fee_rate::{self, FeeRate},
     time::{self, BlockTime},
     weight::{self, Weight},
 };
+
+#[deprecated(since = "TBD", note = "use `BlockHeightInterval` instead")]
+#[doc(hidden)]
+pub type BlockInterval = BlockHeightInterval;
 
 #[doc(inline)]
 #[cfg(feature = "alloc")]

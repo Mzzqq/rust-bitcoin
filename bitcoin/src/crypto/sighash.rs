@@ -1532,7 +1532,8 @@ impl<'a> Arbitrary<'a> for TapSighashType {
 #[cfg(test)]
 mod tests {
     use hashes::HashEngine;
-    use hex::{test_hex_unwrap as hex, FromHex};
+    use hex::FromHex;
+    use hex_lit::hex;
 
     use super::*;
     use crate::consensus::deserialize;
@@ -1831,7 +1832,7 @@ mod tests {
 
         let leaf_hash = match (script_hex, script_leaf_hash) {
             (Some(script_hex), _) => {
-                let script_inner = ScriptBuf::from_hex(script_hex).unwrap();
+                let script_inner = ScriptBuf::from_hex_no_length_prefix(script_hex).unwrap();
                 Some(ScriptPath::with_defaults(&script_inner).leaf_hash())
             }
             (_, Some(script_leaf_hash)) => Some(script_leaf_hash.parse::<TapLeafHash>().unwrap()),
@@ -1877,9 +1878,10 @@ mod tests {
             })
         }
 
-        use secp256k1::{SecretKey, XOnlyPublicKey};
+        use secp256k1::SecretKey;
 
         use crate::consensus::serde as con_serde;
+        use crate::crypto::key::XOnlyPublicKey;
         use crate::taproot::{TapNodeHash, TapTweakHash};
 
         #[derive(serde::Deserialize)]
@@ -2088,7 +2090,9 @@ mod tests {
             ),
         ).unwrap();
 
-        let spk = ScriptBuf::from_hex("00141d0f172a0ecb48aee1be1f2687d2963ae33f71a1").unwrap();
+        let spk =
+            ScriptBuf::from_hex_no_length_prefix("00141d0f172a0ecb48aee1be1f2687d2963ae33f71a1")
+                .unwrap();
         let value = Amount::from_sat_u32(600_000_000);
 
         let mut cache = SighashCache::new(&tx);
@@ -2129,7 +2133,8 @@ mod tests {
         ).unwrap();
 
         let redeem_script =
-            ScriptBuf::from_hex("001479091972186c449eb1ded22b78e40d009bdf0089").unwrap();
+            ScriptBuf::from_hex_no_length_prefix("001479091972186c449eb1ded22b78e40d009bdf0089")
+                .unwrap();
         let value = Amount::from_sat_u32(1_000_000_000);
 
         let mut cache = SighashCache::new(&tx);
@@ -2170,7 +2175,7 @@ mod tests {
         ))
         .unwrap();
 
-        let witness_script = ScriptBuf::from_hex(
+        let witness_script = ScriptBuf::from_hex_no_length_prefix(
             "56210307b8ae49ac90a048e9b53357a2354b3334e9c8bee813ecb98e99a7e07e8c3ba32103b28f0c28\
              bfab54554ae8c658ac5c3e0ce6e79ad336331f78c428dd43eea8449b21034b8113d703413d57761b8b\
              9781957b8c0ac1dfe69f492580ca4195f50376ba4a21033400f6afecb833092a9a21cfdf1ed1376e58\

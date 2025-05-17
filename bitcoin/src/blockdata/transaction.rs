@@ -20,13 +20,14 @@ use primitives::Sequence;
 use super::Weight;
 use crate::consensus::{self, encode, Decodable, Encodable};
 use crate::internal_macros::{impl_consensus_encoding, impl_hashencode};
-use crate::locktime::absolute::{self, Height, Time};
+use crate::locktime::absolute::{self, Height, MedianTimePast};
 use crate::prelude::{Borrow, Vec};
 use crate::script::{Script, ScriptBuf, ScriptExt as _, ScriptExtPriv as _};
 #[cfg(doc)]
 use crate::sighash::{EcdsaSighashType, TapSighashType};
 use crate::witness::Witness;
 use crate::{Amount, FeeRate, SignedAmount};
+use units::NumOpResult;
 
 #[rustfmt::skip]            // Keep public re-exports separate.
 #[doc(inline)]
@@ -295,7 +296,7 @@ pub trait TransactionExt: sealed::Sealed {
     /// By definition if the lock time is not enabled the transaction's absolute timelock is
     /// considered to be satisfied i.e., there are no timelock constraints restricting this
     /// transaction from being mined immediately.
-    fn is_absolute_timelock_satisfied(&self, height: Height, time: Time) -> bool;
+    fn is_absolute_timelock_satisfied(&self, height: Height, time: MedianTimePast) -> bool;
 
     /// Returns `true` if this transactions nLockTime is enabled ([BIP-65]).
     ///
@@ -393,7 +394,7 @@ impl TransactionExt for Transaction {
 
     fn is_explicitly_rbf(&self) -> bool { self.input.iter().any(|input| input.sequence.is_rbf()) }
 
-    fn is_absolute_timelock_satisfied(&self, height: Height, time: Time) -> bool {
+    fn is_absolute_timelock_satisfied(&self, height: Height, time: MedianTimePast) -> bool {
         if !self.is_lock_time_enabled() {
             return true;
         }
@@ -772,15 +773,23 @@ impl Decodable for Transaction {
 /// # Parameters
 ///
 /// * `fee_rate` - the fee rate of the transaction being created.
-/// * `satisfaction_weight` - satisfied spending conditions weight.
+/// * `input_weight_prediction` - the predicted input weight.
+///
+/// # Returns
+///
+/// This will return [`NumOpResult::Error`] if the fee calculation (fee_rate * weight) overflows.
+/// Otherwise, [`NumOpResult::Valid`] will wrap the successful calculation.
 pub fn effective_value(
     fee_rate: FeeRate,
-    satisfaction_weight: Weight,
+    input_weight_prediction: InputWeightPrediction,
     value: Amount,
-) -> Option<SignedAmount> {
-    let weight = satisfaction_weight.checked_add(TX_IN_BASE_WEIGHT)?;
-    let signed_input_fee = fee_rate.to_fee(weight)?.to_signed();
-    value.to_signed().checked_sub(signed_input_fee)
+) -> NumOpResult<SignedAmount> {
+    let weight = input_weight_prediction.total_weight();
+
+    fee_rate
+        .to_fee(weight)
+        .map(Amount::to_signed)
+        .and_then(|fee| value.to_signed() - fee)    // Cannot overflow.
 }
 
 /// Predicts the weight of a to-be-constructed transaction.
@@ -1137,7 +1146,8 @@ mod sealed {
 
 #[cfg(test)]
 mod tests {
-    use hex::{test_hex_unwrap as hex, FromHex};
+    use hex::FromHex;
+    use hex_lit::hex;
     #[cfg(feature = "serde")]
     use internals::serde_round_trip;
     use units::parse;
@@ -1376,7 +1386,7 @@ mod tests {
         assert_eq!(tx.output.len(), 1);
 
         let reser = serialize(&tx);
-        assert_eq!(tx_bytes, reser);
+        assert_eq!(tx_bytes, *reser);
     }
 
     #[test]
@@ -1522,8 +1532,8 @@ mod tests {
 
     #[test]
     fn huge_witness() {
-        deserialize::<Transaction>(&hex!(include_str!("../../tests/data/huge_witness.hex").trim()))
-            .unwrap();
+        let hex = Vec::from_hex(include_str!("../../tests/data/huge_witness.hex").trim()).unwrap();
+        deserialize::<Transaction>(&hex).unwrap();
     }
 
     #[test]
@@ -1651,25 +1661,20 @@ mod tests {
     fn effective_value_happy_path() {
         let value = "1 cBTC".parse::<Amount>().unwrap();
         let fee_rate = FeeRate::from_sat_per_kwu(10);
-        let satisfaction_weight = Weight::from_wu(204);
-        let effective_value = effective_value(fee_rate, satisfaction_weight, value).unwrap();
+        let effective_value =
+            effective_value(fee_rate, InputWeightPrediction::P2WPKH_MAX, value).unwrap();
 
-        // 10 sat/kwu * (204wu + BASE_WEIGHT) = 4 sats
-        let expected_fee = "4 sats".parse::<SignedAmount>().unwrap();
+        // 10 sat/kwu * 272 wu = 4 sats (rounding up)
+        let expected_fee = "3 sats".parse::<SignedAmount>().unwrap();
         let expected_effective_value = (value.to_signed() - expected_fee).unwrap();
         assert_eq!(effective_value, expected_effective_value);
     }
 
     #[test]
     fn effective_value_fee_rate_does_not_overflow() {
-        let eff_value = effective_value(FeeRate::MAX, Weight::ZERO, Amount::ZERO);
-        assert!(eff_value.is_none());
-    }
-
-    #[test]
-    fn effective_value_weight_does_not_overflow() {
-        let eff_value = effective_value(FeeRate::ZERO, Weight::MAX, Amount::ZERO);
-        assert!(eff_value.is_none());
+        let eff_value =
+            effective_value(FeeRate::MAX, InputWeightPrediction::P2WPKH_MAX, Amount::ZERO);
+        assert!(eff_value.is_error());
     }
 
     #[test]
@@ -1858,7 +1863,7 @@ mod tests {
         fn return_none(_outpoint: &OutPoint) -> Option<TxOut> { None }
 
         for (hx, expected, spent_fn, expected_none) in tx_hexes.iter() {
-            let tx_bytes = hex!(hx);
+            let tx_bytes = Vec::from_hex(hx).unwrap();
             let tx: Transaction = deserialize(&tx_bytes).unwrap();
             assert_eq!(tx.total_sigop_cost(spent_fn), *expected);
             assert_eq!(tx.total_sigop_cost(return_none), *expected_none);
@@ -1935,6 +1940,62 @@ mod tests {
     }
 
     #[test]
+    // needless_borrows_for_generic_args incorrecctly identifies &[] as a needless borrow
+    #[allow(clippy::needless_borrows_for_generic_args)]
+    fn weight_prediction_new() {
+        let p2wpkh_max = InputWeightPrediction::new(0, [72,33]);
+        assert_eq!(p2wpkh_max.script_size, 1);
+        assert_eq!(p2wpkh_max.witness_size, 108);
+        assert_eq!(p2wpkh_max.total_weight(), Weight::from_wu(272));
+        assert_eq!(p2wpkh_max.total_weight(), InputWeightPrediction::P2WPKH_MAX.total_weight());
+
+        let nested_p2wpkh_max = InputWeightPrediction::new(23, [72, 33]);
+        assert_eq!(nested_p2wpkh_max.script_size, 24);
+        assert_eq!(nested_p2wpkh_max.witness_size, 108);
+        assert_eq!(nested_p2wpkh_max.total_weight(), Weight::from_wu(364));
+        assert_eq!(
+            nested_p2wpkh_max.total_weight(),
+            InputWeightPrediction::NESTED_P2WPKH_MAX.total_weight()
+        );
+
+        let p2pkh_compressed_max = InputWeightPrediction::new(107, &[]);
+        assert_eq!(p2pkh_compressed_max.script_size, 108);
+        assert_eq!(p2pkh_compressed_max.witness_size, 0);
+        assert_eq!(p2pkh_compressed_max.total_weight(), Weight::from_wu(592));
+        assert_eq!(
+            p2pkh_compressed_max.total_weight(),
+            InputWeightPrediction::P2PKH_COMPRESSED_MAX.total_weight()
+        );
+
+        let p2pkh_uncompressed_max = InputWeightPrediction::new(139, &[]);
+        assert_eq!(p2pkh_uncompressed_max.script_size, 140);
+        assert_eq!(p2pkh_uncompressed_max.witness_size, 0);
+        assert_eq!(p2pkh_uncompressed_max.total_weight(), Weight::from_wu(720));
+        assert_eq!(
+            p2pkh_uncompressed_max.total_weight(),
+            InputWeightPrediction::P2PKH_UNCOMPRESSED_MAX.total_weight()
+        );
+
+        let p2tr_key_default_sighash = InputWeightPrediction::new(0, [64]);
+        assert_eq!(p2tr_key_default_sighash.script_size, 1);
+        assert_eq!(p2tr_key_default_sighash.witness_size, 66);
+        assert_eq!(p2tr_key_default_sighash.total_weight(), Weight::from_wu(230));
+        assert_eq!(
+            p2tr_key_default_sighash.total_weight(),
+            InputWeightPrediction::P2TR_KEY_DEFAULT_SIGHASH.total_weight()
+        );
+
+        let p2tr_key_non_default_sighash = InputWeightPrediction::new(0, [65]);
+        assert_eq!(p2tr_key_non_default_sighash.script_size, 1);
+        assert_eq!(p2tr_key_non_default_sighash.witness_size, 67);
+        assert_eq!(p2tr_key_non_default_sighash.total_weight(), Weight::from_wu(231));
+        assert_eq!(
+            p2tr_key_non_default_sighash.total_weight(),
+            InputWeightPrediction::P2TR_KEY_NON_DEFAULT_SIGHASH.total_weight()
+        );
+    }
+
+    #[test]
     fn sequence_debug_output() {
         let seq = Sequence::from_seconds_floor(1000);
         println!("{:?}", seq)
@@ -1966,20 +2027,17 @@ mod tests {
 
 #[cfg(bench)]
 mod benches {
-    use hex::test_hex_unwrap as hex;
     use io::sink;
     use test::{black_box, Bencher};
 
     use super::*;
-    use crate::consensus::{deserialize, Encodable};
+    use crate::consensus::{encode, Encodable};
 
     const SOME_TX: &str = "0100000001a15d57094aa7a21a28cb20b59aab8fc7d1149a3bdbcddba9c622e4f5f6a99ece010000006c493046022100f93bb0e7d8db7bd46e40132d1f8242026e045f03a0efe71bbb8e3f475e970d790221009337cd7f1f929f00cc6ff01f03729b069a7c21b59b1736ddfee5db5946c5da8c0121033b9b137ee87d5a812d6f506efdd37f0affa7ffc310711c06c7f3e097c9447c52ffffffff0100e1f505000000001976a9140389035a9225b3839e2bbf32d826a1e222031fd888ac00000000";
 
     #[bench]
     pub fn bench_transaction_size(bh: &mut Bencher) {
-        let raw_tx = hex!(SOME_TX);
-
-        let mut tx: Transaction = deserialize(&raw_tx).unwrap();
+        let mut tx: Transaction = encode::deserialize_hex(SOME_TX).unwrap();
 
         bh.iter(|| {
             black_box(black_box(&mut tx).total_size());
@@ -1988,10 +2046,8 @@ mod benches {
 
     #[bench]
     pub fn bench_transaction_serialize(bh: &mut Bencher) {
-        let raw_tx = hex!(SOME_TX);
-        let tx: Transaction = deserialize(&raw_tx).unwrap();
-
-        let mut data = Vec::with_capacity(raw_tx.len());
+        let tx: Transaction = encode::deserialize_hex(SOME_TX).unwrap();
+        let mut data = Vec::with_capacity(SOME_TX.len());
 
         bh.iter(|| {
             let result = tx.consensus_encode(&mut data);
@@ -2002,8 +2058,7 @@ mod benches {
 
     #[bench]
     pub fn bench_transaction_serialize_logic(bh: &mut Bencher) {
-        let raw_tx = hex!(SOME_TX);
-        let tx: Transaction = deserialize(&raw_tx).unwrap();
+        let tx: Transaction = encode::deserialize_hex(SOME_TX).unwrap();
 
         bh.iter(|| {
             let size = tx.consensus_encode(&mut sink());
@@ -2013,10 +2068,19 @@ mod benches {
 
     #[bench]
     pub fn bench_transaction_deserialize(bh: &mut Bencher) {
-        let raw_tx = hex!(SOME_TX);
+        // hex_lit does not work in bench code for some reason. Perhaps criterion fixes this.
+        let raw_tx = <Vec<u8> as hex::FromHex>::from_hex(SOME_TX).unwrap();
 
         bh.iter(|| {
-            let tx: Transaction = deserialize(&raw_tx).unwrap();
+            let tx: Transaction = encode::deserialize(&raw_tx).unwrap();
+            black_box(&tx);
+        });
+    }
+
+    #[bench]
+    pub fn bench_transaction_deserialize_hex(bh: &mut Bencher) {
+        bh.iter(|| {
+            let tx: Transaction = encode::deserialize_hex(SOME_TX).unwrap();
             black_box(&tx);
         });
     }

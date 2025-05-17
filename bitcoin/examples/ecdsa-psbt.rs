@@ -5,7 +5,7 @@
 //!
 //! You can verify the workflow using `bitcoind` and `bitcoin-cli`.
 //!
-//! ## Example Setup
+//! # Example Setup
 //!
 //! 1. Start Bitcoin Core in Regtest mode, for example:
 //!
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
     tx.verify(|_| Some(previous_output())).expect("failed to verify transaction");
 
     let hex = encode::serialize_hex(&tx);
-    println!("You should now be able to broadcast the following transaction: \n\n{}", hex);
+    println!("You should now be able to broadcast the following transaction: \n\n{hex}");
 
     Ok(())
 }
@@ -118,11 +118,12 @@ impl ColdStorage {
         // Hardened children require secret data to derive.
 
         let path = "84h/0h/0h".into_derivation_path()?;
-        let account_0_xpriv = master_xpriv.derive_xpriv(secp, &path);
+        let account_0_xpriv =
+            master_xpriv.derive_xpriv(secp, &path).expect("derivation path is short");
         let account_0_xpub = Xpub::from_xpriv(secp, &account_0_xpriv);
 
         let path = INPUT_UTXO_DERIVATION_PATH.into_derivation_path()?;
-        let input_xpriv = master_xpriv.derive_xpriv(secp, &path);
+        let input_xpriv = master_xpriv.derive_xpriv(secp, &path).expect("derivation path is short");
         let input_xpub = Xpub::from_xpriv(secp, &input_xpriv);
 
         let wallet = ColdStorage { master_xpriv, master_xpub };
@@ -275,7 +276,7 @@ fn input_derivation_path() -> Result<DerivationPath> {
 }
 
 fn previous_output() -> TxOut {
-    let script_pubkey = ScriptBuf::from_hex(INPUT_UTXO_SCRIPT_PUBKEY)
+    let script_pubkey = ScriptBuf::from_hex_no_length_prefix(INPUT_UTXO_SCRIPT_PUBKEY)
         .expect("failed to parse input utxo scriptPubkey");
     let amount = INPUT_UTXO_VALUE.parse::<Amount>().expect("failed to parse input utxo value");
 

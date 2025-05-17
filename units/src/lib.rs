@@ -14,7 +14,7 @@
 //! // Exactly the same as `use bitcoin::{amount, Amount}`.
 //! use bitcoin_units::{amount, Amount};
 //!
-//! let amount = Amount::from_sat(1_000)?;
+//! let _amount = Amount::from_sat(1_000)?;
 //! # Ok::<_, amount::OutOfRangeError>(())
 //! ```
 
@@ -25,6 +25,8 @@
 #![warn(missing_docs)]
 #![warn(deprecated_in_future)]
 #![doc(test(attr(warn(unused))))]
+// Exclude lints we don't think are valuable.
+#![allow(clippy::uninlined_format_args)] // Allow `format!("{}", x)`instead of enforcing `format!("{x}")`
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -56,10 +58,14 @@ pub mod weight;
 #[rustfmt::skip]
 pub use self::{
     amount::{Amount, SignedAmount},
-    block::{BlockHeight, BlockInterval},
+    block::{BlockHeight, BlockHeightInterval, BlockMtp, BlockMtpInterval},
     fee_rate::FeeRate,
     result::{NumOpError, NumOpResult, MathOp},
     time::BlockTime,
     weight::Weight
 };
 pub(crate) use self::result::OptionExt;
+
+#[deprecated(since = "TBD", note = "use `BlockHeightInterval` instead")]
+#[doc(hidden)]
+pub type BlockInterval = BlockHeightInterval;

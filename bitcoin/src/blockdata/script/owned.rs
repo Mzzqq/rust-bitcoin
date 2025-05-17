@@ -3,10 +3,11 @@
 #[cfg(doc)]
 use core::ops::Deref;
 
-use hex::FromHex;
+use hex::FromHex as _;
 use internals::ToU64 as _;
 
 use super::{opcode_to_verify, Builder, Instruction, PushBytes, ScriptExtPriv as _};
+use crate::consensus;
 use crate::opcodes::all::*;
 use crate::opcodes::{self, Opcode};
 use crate::prelude::Vec;
@@ -27,7 +28,23 @@ crate::internal_macros::define_extension_trait! {
         }
 
         /// Constructs a new [`ScriptBuf`] from a hex string.
+        ///
+        /// The input string is expected to be consensus encoded i.e., includes the length prefix.
+        fn from_hex_prefixed(s: &str) -> Result<ScriptBuf, consensus::FromHexError> {
+            consensus::encode::deserialize_hex(s)
+        }
+
+        /// Constructs a new [`ScriptBuf`] from a hex string.
+        #[deprecated(since = "TBD", note = "use `from_hex_string_no_length_prefix()` instead")]
         fn from_hex(s: &str) -> Result<ScriptBuf, hex::HexToBytesError> {
+            Self::from_hex_no_length_prefix(s)
+        }
+
+        /// Constructs a new [`ScriptBuf`] from a hex string.
+        ///
+        /// This is **not** consensus encoding. If your hex string is a consensus encoded script
+        /// then use `ScriptBuf::from_hex_prefixed`.
+        fn from_hex_no_length_prefix(s: &str) -> Result<ScriptBuf, hex::HexToBytesError> {
             let v = Vec::from_hex(s)?;
             Ok(ScriptBuf::from_bytes(v))
         }
@@ -37,6 +54,25 @@ crate::internal_macros::define_extension_trait! {
 
         /// Adds instructions to push some arbitrary data onto the stack.
         fn push_slice<T: AsRef<PushBytes>>(&mut self, data: T) {
+            let bytes = data.as_ref().as_bytes();
+            if bytes.len() == 1 && (bytes[0] == 0x81 || bytes[0] <= 16) {
+                match bytes[0] {
+                    0x81 => { self.push_opcode(OP_PUSHNUM_NEG1); },
+                    0 => { self.push_opcode(OP_PUSHBYTES_0); },
+                    1..=16 => { self.push_opcode(Opcode::from(bytes[0] + (OP_PUSHNUM_1.to_u8() - 1))); },
+                    _ => {}, // unreachable arm
+                }
+            } else {
+                self.push_slice_non_minimal(data);
+            }
+        }
+
+        /// Adds instructions to push some arbitrary data onto the stack without minimality.
+        ///
+        /// Standardness rules require push minimality according to [CheckMinimalPush] of core.
+        ///
+        /// [CheckMinimalPush]: <https://github.com/bitcoin/bitcoin/blob/99a4ddf5ab1b3e514d08b90ad8565827fda7b63b/src/script/script.cpp#L366>
+        fn push_slice_non_minimal<T: AsRef<PushBytes>>(&mut self, data: T) {
             let data = data.as_ref();
             self.reserve(ScriptBuf::reserved_len_for_slice(data.len()));
             self.push_slice_no_opt(data);

@@ -47,7 +47,7 @@ pub trait Validation: sealed::Validation + Sync + Send + Sized + Unpin {
 ///
 /// [wiki-block]: https://en.bitcoin.it/wiki/Block
 ///
-/// ### Bitcoin Core References
+/// # Bitcoin Core References
 ///
 /// * [CBlock definition](https://github.com/bitcoin/bitcoin/blob/345457b542b6a980ccfbc868af0970a6f91d1b82/src/primitives/block.h#L62)
 #[cfg(feature = "alloc")]
@@ -167,7 +167,7 @@ mod sealed {
 ///
 /// [Merkle tree]: https://en.wikipedia.org/wiki/Merkle_tree
 ///
-/// ### Bitcoin Core References
+/// # Bitcoin Core References
 ///
 /// * [CBlockHeader definition](https://github.com/bitcoin/bitcoin/blob/345457b542b6a980ccfbc868af0970a6f91d1b82/src/primitives/block.h#L20)
 #[derive(Copy, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
@@ -207,6 +207,28 @@ impl Header {
     }
 }
 
+#[cfg(feature = "hex")]
+impl fmt::Display for Header {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use fmt::Write as _;
+        use hex::DisplayHex as _;
+
+        let mut buf = arrayvec::ArrayString::<160>::new();
+        write!(
+            &mut buf,
+            "{}{}{}{}{}{}",
+            self.version.to_consensus().to_le_bytes().as_hex(),
+            self.prev_blockhash.as_byte_array().as_hex(),
+            self.merkle_root.as_byte_array().as_hex(),
+            self.time.to_u32().to_le_bytes().as_hex(),
+            self.bits.to_consensus().to_le_bytes().as_hex(),
+            self.nonce.to_le_bytes().as_hex(),
+        )
+        .expect("total length of written objects is 160 characters");
+        fmt::Display::fmt(&buf, f)
+    }
+}
+
 impl fmt::Debug for Header {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Header")
@@ -240,7 +262,7 @@ impl From<&Header> for BlockHash {
 ///
 /// > When a block nVersion does not have top bits 001, it is treated as if all bits are 0 for the purposes of deployments.
 ///
-/// ### Relevant BIPs
+/// # Relevant BIPs
 ///
 /// * [BIP9 - Version bits with timeout and delay](https://github.com/bitcoin/bips/blob/master/bip-0009.mediawiki) (current usage)
 /// * [BIP34 - Block v2, Height in Coinbase](https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki)
@@ -534,5 +556,36 @@ mod tests {
             header.nonce
         );
         assert_eq!(format!("{:?}", header), expected);
+    }
+
+    #[test]
+    #[cfg(feature = "hex")]
+    fn header_display() {
+        let seconds: u32 = 1_653_195_600; // Arbitrary timestamp: May 22nd, 5am UTC.
+
+        let header = Header {
+            version: Version::TWO,
+            prev_blockhash: BlockHash::from_byte_array([0xab; 32]),
+            merkle_root: TxMerkleNode::from_byte_array([0xcd; 32]),
+            time: BlockTime::from(seconds),
+            bits: CompactTarget::from_consensus(0xbeef),
+            nonce: 0xcafe,
+        };
+
+        let want = concat!(
+            "02000000",                                                         // version
+            "abababababababababababababababababababababababababababababababab", // prev_blockhash
+            "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", // merkle_root
+            "50c38962",                                                         // time
+            "efbe0000",                                                         // bits
+            "feca0000",                                                         // nonce
+        );
+        assert_eq!(want.len(), 160);
+        assert_eq!(format!("{}", header), want);
+
+        // Check how formatting options are handled.
+        let want = format!("{:.20}", want);
+        let got = format!("{:.20}", header);
+        assert_eq!(got, want);
     }
 }

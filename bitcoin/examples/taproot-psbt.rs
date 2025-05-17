@@ -125,8 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     )?);
     println!(
-        "\nYou should now be able to broadcast the following transaction: \n\n{}",
-        tx_hex_string
+        "\nYou should now be able to broadcast the following transaction: \n\n{tx_hex_string}"
     );
 
     println!("\nEND EXAMPLE 1\n");
@@ -147,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         let tx_hex = encode::serialize_hex(&tx);
 
-        println!("Inheritance funding tx hex:\n\n{}", tx_hex);
+        println!("Inheritance funding tx hex:\n\n{tx_hex}");
         // You can now broadcast the transaction hex:
         // bt sendrawtransaction ...
         //
@@ -160,7 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             to_address,
         )?;
         let spending_tx_hex = encode::serialize_hex(&spending_tx);
-        println!("\nInheritance spending tx hex:\n\n{}", spending_tx_hex);
+        println!("\nInheritance spending tx hex:\n\n{spending_tx_hex}");
         // If you try to broadcast now, the transaction will be rejected as it is timelocked.
         // First mine 900 blocks so we're sure we are over the 1000 block locktime:
         // bt generatetoaddress 900 $(bt-benefactor getnewaddress '' 'bech32m')
@@ -185,7 +184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         let tx_hex = encode::serialize_hex(&tx);
 
-        println!("Inheritance funding tx hex:\n\n{}", tx_hex);
+        println!("Inheritance funding tx hex:\n\n{tx_hex}");
         // You can now broadcast the transaction hex:
         // bt sendrawtransaction ...
         //
@@ -200,7 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (tx, _) = benefactor.refresh_tx(1000)?;
         let tx_hex = encode::serialize_hex(&tx);
 
-        println!("\nRefreshed inheritance tx hex:\n\n{}\n", tx_hex);
+        println!("\nRefreshed inheritance tx hex:\n\n{tx_hex}\n");
 
         println!("\nEND EXAMPLE 3\n");
         println!("----------------\n");
@@ -257,7 +256,7 @@ fn generate_bip86_key_spend_tx(
 
     let mut input = Input {
         witness_utxo: {
-            let script_pubkey = ScriptBuf::from_hex(input_utxo.script_pubkey)
+            let script_pubkey = ScriptBuf::from_hex_no_length_prefix(input_utxo.script_pubkey)
                 .expect("failed to parse input utxo scriptPubkey");
             Some(TxOut { value: from_amount, script_pubkey })
         },
@@ -275,7 +274,7 @@ fn generate_bip86_key_spend_tx(
     for input in [&input_utxo].iter() {
         input_txouts.push(TxOut {
             value: input.amount,
-            script_pubkey: ScriptBuf::from_hex(input.script_pubkey)?,
+            script_pubkey: ScriptBuf::from_hex_no_length_prefix(input.script_pubkey)?,
         });
     }
 
@@ -299,7 +298,7 @@ fn generate_bip86_key_spend_tx(
                 .ok_or("missing Taproot key origin")?;
 
             let secret_key =
-                master_xpriv.derive_xpriv(secp, &derivation_path).to_private_key().inner;
+                master_xpriv.derive_xpriv(secp, &derivation_path)?.to_private_key().inner;
             sign_psbt_taproot(
                 secret_key,
                 input.tap_internal_key.unwrap(),
@@ -333,7 +332,7 @@ fn generate_bip86_key_spend_tx(
     tx.verify(|_| {
         Some(TxOut {
             value: from_amount,
-            script_pubkey: ScriptBuf::from_hex(input_utxo.script_pubkey).unwrap(),
+            script_pubkey: ScriptBuf::from_hex_no_length_prefix(input_utxo.script_pubkey).unwrap(),
         })
     })
     .expect("failed to verify transaction");
@@ -393,8 +392,11 @@ impl BenefactorWallet {
         // We use some other derivation path in this example for our inheritance protocol. The important thing is to ensure
         // that we use an unhardened path so we can make use of xpubs.
         let derivation_path = format!("101/1/0/0/{}", self.next).parse::<DerivationPath>()?;
-        let internal_keypair =
-            self.master_xpriv.derive_xpriv(&self.secp, &derivation_path).to_keypair(&self.secp);
+        let internal_keypair = self
+            .master_xpriv
+            .derive_xpriv(&self.secp, &derivation_path)
+            .expect("derivation path is short")
+            .to_keypair(&self.secp);
         let beneficiary_key =
             self.beneficiary_xpub.derive_xpub(&self.secp, &derivation_path)?.to_x_only_public_key();
 
@@ -442,7 +444,7 @@ impl BenefactorWallet {
             (vec![leaf_hash], (self.beneficiary_xpub.fingerprint(), derivation_path.clone())),
         );
         origins.insert(
-            internal_keypair.x_only_public_key().0,
+            internal_keypair.x_only_public_key().0.into(),
             (vec![], (self.master_xpriv.fingerprint(&self.secp), derivation_path)),
         );
         let ty = "SIGHASH_ALL".parse::<PsbtSighashType>()?;
@@ -457,7 +459,7 @@ impl BenefactorWallet {
             tap_key_origins: origins,
             tap_merkle_root: taproot_spend_info.merkle_root(),
             sighash_type: Some(ty),
-            tap_internal_key: Some(internal_keypair.x_only_public_key().0),
+            tap_internal_key: Some(internal_keypair.x_only_public_key().0.into()),
             tap_scripts,
             ..Default::default()
         };
@@ -486,6 +488,7 @@ impl BenefactorWallet {
             let new_internal_keypair = self
                 .master_xpriv
                 .derive_xpriv(&self.secp, &new_derivation_path)
+                .expect("derivation path is short")
                 .to_keypair(&self.secp);
             let beneficiary_key = self
                 .beneficiary_xpub
@@ -538,6 +541,7 @@ impl BenefactorWallet {
                 let secret_key = self
                     .master_xpriv
                     .derive_xpriv(&self.secp, &derivation_path)
+                    .expect("derivation path is short")
                     .to_private_key()
                     .inner;
                 sign_psbt_taproot(
@@ -608,7 +612,7 @@ impl BenefactorWallet {
                 tap_key_origins: origins,
                 tap_merkle_root: taproot_spend_info.merkle_root(),
                 sighash_type: Some(ty),
-                tap_internal_key: Some(new_internal_keypair.x_only_public_key().0),
+                tap_internal_key: Some(new_internal_keypair.x_only_public_key().0.into()),
                 tap_scripts,
                 ..Default::default()
             };
@@ -660,8 +664,11 @@ impl BeneficiaryWallet {
         for (x_only_pubkey, (leaf_hashes, (_, derivation_path))) in
             &psbt.inputs[0].tap_key_origins.clone()
         {
-            let secret_key =
-                self.master_xpriv.derive_xpriv(&self.secp, &derivation_path).to_private_key().inner;
+            let secret_key = self
+                .master_xpriv
+                .derive_xpriv(&self.secp, &derivation_path)?
+                .to_private_key()
+                .inner;
             for lh in leaf_hashes {
                 let sighash_type = TapSighashType::All;
                 let hash = SighashCache::new(&unsigned_tx).taproot_script_spend_signature_hash(
@@ -744,7 +751,7 @@ fn sign_psbt_taproot(
 ) {
     let keypair = secp256k1::Keypair::from_seckey_slice(secp, secret_key.as_ref()).unwrap();
     let keypair = match leaf_hash {
-        None => keypair.tap_tweak(secp, psbt_input.tap_merkle_root).to_inner(),
+        None => keypair.tap_tweak(secp, psbt_input.tap_merkle_root).to_keypair(),
         Some(_) => keypair, // no tweak for script spend
     };
 

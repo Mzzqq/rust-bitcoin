@@ -14,8 +14,8 @@ use arbitrary::{Arbitrary, Unstructured};
 // These imports test "typical" usage by user code.
 use bitcoin_units::locktime::{absolute, relative}; // Typical usage is `absolute::Height`.
 use bitcoin_units::{
-    amount, block, fee_rate, locktime, parse, weight, Amount, BlockHeight, BlockInterval,
-    BlockTime, FeeRate, SignedAmount, Weight,
+    amount, block, fee_rate, locktime, parse, weight, Amount, BlockHeight, BlockInterval, BlockMtp,
+    BlockMtpInterval, BlockTime, FeeRate, SignedAmount, Weight,
 };
 
 /// A struct that includes all public non-error enums.
@@ -38,11 +38,13 @@ struct Structs {
     e: BlockInterval,
     f: FeeRate,
     g: absolute::Height,
-    h: absolute::Time,
+    h: absolute::MedianTimePast,
     i: relative::Height,
     j: relative::Time,
     k: Weight,
     l: BlockTime,
+    m: BlockMtp,
+    n: BlockMtpInterval,
 }
 
 impl Structs {
@@ -55,11 +57,13 @@ impl Structs {
             e: BlockInterval::MAX,
             f: FeeRate::MAX,
             g: absolute::Height::MAX,
-            h: absolute::Time::MAX,
+            h: absolute::MedianTimePast::MAX,
             i: relative::Height::MAX,
             j: relative::Time::MAX,
             k: Weight::MAX,
             l: BlockTime::from_u32(u32::MAX),
+            m: BlockMtp::MAX,
+            n: BlockMtpInterval::MAX,
         }
     }
 }
@@ -85,11 +89,13 @@ struct CommonTraits {
     e: BlockInterval,
     f: FeeRate,
     g: absolute::Height,
-    h: absolute::Time,
+    h: absolute::MedianTimePast,
     i: relative::Height,
     j: relative::Time,
     k: Weight,
     l: BlockTime,
+    m: BlockMtp,
+    n: BlockMtpInterval,
 }
 
 /// A struct that includes all types that implement `Default`.
@@ -100,6 +106,7 @@ struct Default {
     c: BlockInterval,
     d: relative::Height,
     e: relative::Time,
+    f: BlockMtpInterval,
 }
 
 /// A struct that includes all public error types.
@@ -128,7 +135,7 @@ struct Errors {
     t: amount::PossiblyConfusingDenominationError,
     u: amount::TooPreciseError,
     v: amount::UnknownDenominationError,
-    w: block::TooBigForRelativeBlockHeightError,
+    w: block::TooBigForRelativeHeightError,
     x: locktime::absolute::ConversionError,
     y: locktime::absolute::Height,
     z: locktime::absolute::ParseHeightError,
@@ -147,7 +154,8 @@ fn api_can_use_modules_from_crate_root() {
 #[test]
 fn api_can_use_types_from_crate_root() {
     use bitcoin_units::{
-        Amount, BlockHeight, BlockInterval, BlockTime, FeeRate, SignedAmount, Weight,
+        Amount, BlockHeight, BlockInterval, BlockMtp, BlockMtpInterval, BlockTime, FeeRate,
+        SignedAmount, Weight,
     };
 }
 
@@ -163,7 +171,7 @@ fn api_can_use_all_types_from_module_amount() {
 
 #[test]
 fn api_can_use_all_types_from_module_block() {
-    use bitcoin_units::block::{BlockHeight, BlockInterval, TooBigForRelativeBlockHeightError};
+    use bitcoin_units::block::{BlockHeight, BlockHeightInterval, TooBigForRelativeHeightError};
 }
 
 #[test]
@@ -174,7 +182,7 @@ fn api_can_use_all_types_from_module_fee_rate() {
 #[test]
 fn api_can_use_all_types_from_module_locktime_absolute() {
     use bitcoin_units::locktime::absolute::{
-        ConversionError, Height, ParseHeightError, ParseTimeError, Time,
+        ConversionError, Height, MedianTimePast, ParseHeightError, ParseTimeError,
     };
 }
 
@@ -255,6 +263,7 @@ fn regression_default() {
         c: BlockInterval::ZERO,
         d: relative::Height::ZERO,
         e: relative::Time::ZERO,
+        f: BlockMtpInterval::ZERO,
     };
     assert_eq!(got, want);
 }
@@ -291,11 +300,13 @@ impl<'a> Arbitrary<'a> for Structs {
             e: BlockInterval::arbitrary(u)?,
             f: FeeRate::arbitrary(u)?,
             g: absolute::Height::arbitrary(u)?,
-            h: absolute::Time::arbitrary(u)?,
+            h: absolute::MedianTimePast::arbitrary(u)?,
             i: relative::Height::arbitrary(u)?,
             j: relative::Time::arbitrary(u)?,
             k: Weight::arbitrary(u)?,
             l: BlockTime::arbitrary(u)?,
+            m: BlockMtp::arbitrary(u)?,
+            n: BlockMtpInterval::arbitrary(u)?,
         };
         Ok(a)
     }

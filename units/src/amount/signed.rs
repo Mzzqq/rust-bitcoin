@@ -25,7 +25,7 @@ mod encapsulate {
     /// conversion to various denominations. The [`SignedAmount`] type does not implement [`serde`]
     /// traits but we do provide modules for serializing as satoshis or bitcoin.
     ///
-    /// Warning!
+    /// **Warning!**
     ///
     /// This type implements several arithmetic operations from [`core::ops`].
     /// To prevent errors due to an overflow when using these operations,
@@ -56,14 +56,6 @@ mod encapsulate {
         pub const MAX: Self = Self(21_000_000 * 100_000_000);
         /// The minimum value of an amount.
         pub const MIN: Self = Self(-21_000_000 * 100_000_000);
-
-        /// Constructs a new [`SignedAmount`] with satoshi precision and the given number of satoshis.
-        ///
-        /// Accepts an `i32` which is guaranteed to be in range for the type, but which can only
-        /// represent roughly -21.47 to 21.47 BTC.
-        pub const fn from_sat_i32(satoshi: i32) -> Self {
-            Self(satoshi as i64) // cannot use i64::from in a constfn
-        }
 
         /// Gets the number of satoshis in this [`SignedAmount`].
         ///
@@ -116,6 +108,18 @@ impl SignedAmount {
     /// The maximum value allowed as an amount. Useful for sanity checking.
     pub const MAX_MONEY: Self = Self::MAX;
 
+    /// Constructs a new [`SignedAmount`] with satoshi precision and the given number of satoshis.
+    ///
+    /// Accepts an `i32` which is guaranteed to be in range for the type, but which can only
+    /// represent roughly -21.47 to 21.47 BTC.
+    pub const fn from_sat_i32(satoshi: i32) -> Self {
+        let sats = satoshi as i64; // cannot use i64::from in a constfn
+        match Self::from_sat(sats) {
+            Ok(amount) => amount,
+            Err(_) => panic!("unreachable - 32,767 BTC is within range"),
+        }
+    }
+
     /// Converts from a value expressing a decimal number of bitcoin to a [`SignedAmount`].
     ///
     /// # Errors
@@ -152,7 +156,7 @@ impl SignedAmount {
 
         match Self::from_sat(sats) {
             Ok(amount) => amount,
-            Err(_) => panic!("unreachable - 65536 BTC is within range"),
+            Err(_) => panic!("unreachable - 32,767 BTC is within range"),
         }
     }
 

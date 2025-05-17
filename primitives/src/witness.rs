@@ -9,6 +9,8 @@ use core::ops::Index;
 
 #[cfg(feature = "arbitrary")]
 use arbitrary::{Arbitrary, Unstructured};
+#[cfg(feature = "hex")]
+use hex::{error::HexToBytesError, FromHex};
 use internals::compact_size;
 use internals::slice::SliceExt;
 use internals::wrap_debug::WrapDebug;
@@ -218,6 +220,25 @@ impl Witness {
         let end = element_len as usize;
         Some(&slice[..end])
     }
+
+    /// Constructs a new witness from a list of hex strings.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if any of the hex strings are invalid.
+    #[cfg(feature = "hex")]
+    pub fn from_hex<I, T>(iter: I) -> Result<Self, HexToBytesError>
+    where
+        I: IntoIterator<Item = T>,
+        T: AsRef<str>,
+    {
+        let result = iter
+            .into_iter()
+            .map(|hex_str| Vec::from_hex(hex_str.as_ref()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self::from_slice(&result))
+    }
 }
 
 /// Correctness Requirements: value must always fit within u32
@@ -340,6 +361,7 @@ impl fmt::Debug for Witness {
 }
 
 /// An iterator returning individual witness elements.
+#[derive(Clone)]
 pub struct Iter<'a> {
     inner: &'a [u8],
     indices_start: usize,
@@ -384,6 +406,13 @@ impl<'a> IntoIterator for &'a Witness {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter { self.iter() }
+}
+
+impl<T: AsRef<[u8]>> FromIterator<T> for Witness {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let v: Vec<Vec<u8>> = iter.into_iter().map(|item| Vec::from(item.as_ref())).collect();
+        Self::from(v)
+    }
 }
 
 // Serde keep backward compatibility with old Vec<Vec<u8>> format
@@ -839,5 +868,50 @@ mod test {
         let witness = Witness::from_slice(&[vec![0u8, 123, 75], vec![2u8, 6, 3, 7, 8]]);
         let json = serde_json::to_string(&witness).unwrap();
         assert_eq!(json, r#"["007b4b","0206030708"]"#);
+    }
+
+    #[test]
+    fn test_witness_from_iterator() {
+        let bytes1 = [1u8, 2, 3];
+        let bytes2 = [4u8, 5];
+        let bytes3 = [6u8, 7, 8, 9];
+        let data = [&bytes1[..], &bytes2[..], &bytes3[..]];
+
+        // Use FromIterator directly
+        let witness1 = Witness::from_iter(data);
+
+        // Create a witness manually for comparison
+        let mut witness2 = Witness::new();
+        for item in &data {
+            witness2.push(item);
+        }
+        assert_eq!(witness1, witness2);
+        assert_eq!(witness1.len(), witness2.len());
+        assert_eq!(witness1.to_vec(), witness2.to_vec());
+
+        // Test with collect
+        let bytes4 = [0u8, 123, 75];
+        let bytes5 = [2u8, 6, 3, 7, 8];
+        let data = [bytes4.to_vec(), bytes5.to_vec()];
+        let witness3: Witness = data.iter().collect();
+        assert_eq!(witness3.len(), 2);
+        assert_eq!(witness3.to_vec(), data);
+
+        // Test with empty iterator
+        let empty_data: Vec<Vec<u8>> = vec![];
+        let witness4: Witness = empty_data.iter().collect();
+        assert!(witness4.is_empty());
+    }
+
+    #[cfg(feature = "hex")]
+    #[test]
+    fn test_from_hex() {
+        let hex_strings = [
+            "30440220703350f1c8be5b41b4cb03b3b680c4f3337f987514a6b08e16d5d9f81e9b5f72022018fb269ba5b82864c0e1edeaf788829eb332fe34a859cc1f99c4a02edfb5d0df01",
+            "0208689fe2cca52d8726cefaf274de8fa61d5faa5e1058ad35b49fb194c035f9a4",
+        ];
+
+        let witness = Witness::from_hex(hex_strings).unwrap();
+        assert_eq!(witness.len(), 2);
     }
 }

@@ -28,8 +28,8 @@ For changes to our dependencies included in this release see:
 - `bitcoin_hashes 0.15`: [changelog](https://github.com/rust-bitcoin/rust-bitcoin/blob/master/hashes/CHANGELOG.md)
 - `hex-conservative 0.3`: [changelog](https://github.com/rust-bitcoin/hex-conservative/blob/master/CHANGELOG.md)
 - `bitcoin-io 0.2`: [changelog](https://github.com/rust-bitcoin/rust-bitcoin/blob/master/io/CHANGELOG.md)
-- `bitcoin-primitives: 0.101`: [changelog]((https://github.com/rust-bitcoin/rust-bitcoin/blob/master/primitives/CHANGELOG.md))
-- `bitcoin-units 0.2`: [changelog]((https://github.com/rust-bitcoin/rust-bitcoin/blob/master/units/CHANGELOG.md))
+- `bitcoin-primitives: 0.101`: [changelog](https://github.com/rust-bitcoin/rust-bitcoin/blob/master/primitives/CHANGELOG.md)
+- `bitcoin-units 0.2`: [changelog](https://github.com/rust-bitcoin/rust-bitcoin/blob/master/units/CHANGELOG.md)
 - `bitcoinconsensus: 0.106.0+26`: [changelog](https://github.com/rust-bitcoin/rust-bitcoinconsensus/blob/master/CHANGELOG.md)
 
 ## Changes
@@ -41,7 +41,7 @@ For changes to our dependencies included in this release see:
 - Add `Address::into_unchecked` [#3640](https://github.com/rust-bitcoin/rust-bitcoin/pull/3640)
 - Mark `checked_` functions as const [#3636](https://github.com/rust-bitcoin/rust-bitcoin/pull/3636)
 - Mark functions const in `fee_rate` [#3627](https://github.com/rust-bitcoin/rust-bitcoin/pull/3627)
-- Mark funtions const [#3608](https://github.com/rust-bitcoin/rust-bitcoin/pull/3608)
+- Mark functions const [#3608](https://github.com/rust-bitcoin/rust-bitcoin/pull/3608)
 - Add constructor to `FeeRate` [#3604](https://github.com/rust-bitcoin/rust-bitcoin/pull/3604)
 - Fix bug in witness stack getters [#3601](https://github.com/rust-bitcoin/rust-bitcoin/pull/3601)
 - Split `checked_div_by_weight` into floor and ceiling version [#3587](https://github.com/rust-bitcoin/rust-bitcoin/pull/3587)

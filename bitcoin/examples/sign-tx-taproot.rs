@@ -71,7 +71,7 @@ fn main() {
     // Sign the sighash using the secp256k1 library (exported by rust-bitcoin).
     let tweaked: TweakedKeypair = keypair.tap_tweak(&secp, None);
     let msg = Message::from(sighash);
-    let signature = secp.sign_schnorr(msg.as_ref(), &tweaked.to_inner());
+    let signature = secp.sign_schnorr(msg.as_ref(), tweaked.as_keypair());
 
     // Update the witness stack.
     let signature = bitcoin::taproot::Signature { signature, sighash_type };
@@ -81,7 +81,7 @@ fn main() {
     let tx = sighasher.into_transaction();
 
     // BOOM! Transaction signed and ready to broadcast.
-    println!("{:#?}", tx);
+    println!("{tx:#?}");
 }
 
 /// An example of keys controlled by the transaction sender.
@@ -113,10 +113,11 @@ fn receivers_address() -> Address {
 ///
 /// This output is locked to keys that we control, in a real application this would be a valid
 /// output taken from a transaction that appears in the chain.
-fn dummy_unspent_transaction_output<C: Verification>(
+fn dummy_unspent_transaction_output<C: Verification, K: Into<UntweakedPublicKey>>(
     secp: &Secp256k1<C>,
-    internal_key: UntweakedPublicKey,
+    internal_key: K,
 ) -> (OutPoint, TxOut) {
+    let internal_key = internal_key.into();
     let script_pubkey = ScriptBuf::new_p2tr(secp, internal_key, None);
 
     let out_point = OutPoint {

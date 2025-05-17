@@ -48,11 +48,11 @@ use crate::witness::Witness;
 ///
 /// [wiki-transaction]: https://en.bitcoin.it/wiki/Transaction
 ///
-/// ### Bitcoin Core References
+/// # Bitcoin Core References
 ///
 /// * [CTtransaction definition](https://github.com/bitcoin/bitcoin/blob/345457b542b6a980ccfbc868af0970a6f91d1b82/src/primitives/transaction.h#L279)
 ///
-/// ### Serialization notes
+/// # Serialization notes
 ///
 /// If any inputs have nonempty witnesses, the entire transaction is serialized
 /// in the post-BIP141 SegWit format which includes a list of witnesses. If all
@@ -83,7 +83,7 @@ use crate::witness::Witness;
 /// We therefore deviate from the spec by always using the SegWit witness encoding
 /// for 0-input transactions, which results in unambiguously parseable transactions.
 ///
-/// ### A note on ordering
+/// # A note on ordering
 ///
 /// This type implements `Ord`, even though it contains a locktime, which is not
 /// itself `Ord`. This was done to simplify applications that may need to hold
@@ -103,7 +103,7 @@ pub struct Transaction {
     pub version: Version,
     /// Block height or timestamp. Transaction cannot be included in a block until this height/time.
     ///
-    /// ### Relevant BIPs
+    /// # Relevant BIPs
     ///
     /// * [BIP-65 OP_CHECKLOCKTIMEVERIFY](https://github.com/bitcoin/bips/blob/master/bip-0065.mediawiki)
     /// * [BIP-113 Median time-past as endpoint for lock-time calculations](https://github.com/bitcoin/bips/blob/master/bip-0113.mediawiki)
@@ -310,7 +310,7 @@ fn hash_transaction(tx: &Transaction, uses_segwit_serialization: bool) -> sha256
 /// that it spends and set of scripts that satisfy its spending
 /// conditions.
 ///
-/// ### Bitcoin Core References
+/// # Bitcoin Core References
 ///
 /// * [CTxIn definition](https://github.com/bitcoin/bitcoin/blob/345457b542b6a980ccfbc868af0970a6f91d1b82/src/primitives/transaction.h#L65)
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -354,7 +354,7 @@ impl TxIn {
 ///
 /// An output that is not yet spent by an input is called Unspent Transaction Output ("UTXO").
 ///
-/// ### Bitcoin Core References
+/// # Bitcoin Core References
 ///
 /// * [CTxOut definition](https://github.com/bitcoin/bitcoin/blob/345457b542b6a980ccfbc868af0970a6f91d1b82/src/primitives/transaction.h#L148)
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -370,7 +370,7 @@ pub struct TxOut {
 
 /// A reference to a transaction output.
 ///
-/// ### Bitcoin Core References
+/// # Bitcoin Core References
 ///
 /// * [COutPoint definition](https://github.com/bitcoin/bitcoin/blob/345457b542b6a980ccfbc868af0970a6f91d1b82/src/primitives/transaction.h#L26)
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
@@ -564,7 +564,7 @@ impl Version {
     ///
     /// This can accept both standard and non-standard versions.
     #[inline]
-    pub fn maybe_non_standard(version: u32) -> Version { Self(version) }
+    pub const fn maybe_non_standard(version: u32) -> Version { Self(version) }
 
     /// Returns the inner `u32` value of this `Version`.
     #[inline]
@@ -577,8 +577,8 @@ impl Version {
     /// As of Bitcoin Core 28.0 ([release notes](https://bitcoincore.org/en/releases/28.0/)),
     /// versions 1, 2, and 3 are considered standard.
     #[inline]
-    pub fn is_standard(self) -> bool {
-        self == Version::ONE || self == Version::TWO || self == Version::THREE
+    pub const fn is_standard(self) -> bool {
+        self.0 == Version::ONE.0 || self.0 == Version::TWO.0 || self.0 == Version::THREE.0
     }
 }
 
@@ -747,5 +747,20 @@ mod tests {
         assert_eq!(parse_vout("1").unwrap(), 1);
         assert!(parse_vout("01").is_err()); // Leading zero not allowed
         assert!(parse_vout("+1").is_err()); // Non digits not allowed
+    }
+
+    #[test]
+    #[cfg(feature = "alloc")]
+    #[cfg(feature = "hex")]
+    fn outpoint_display_roundtrip() {
+        let outpoint_str = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20:1";
+        let outpoint: OutPoint = outpoint_str.parse().unwrap();
+        assert_eq!(format!("{}", outpoint), outpoint_str);
+    }
+
+    #[test]
+    fn version_display() {
+        let version = Version(123);
+        assert_eq!(format!("{}", version), "123");
     }
 }

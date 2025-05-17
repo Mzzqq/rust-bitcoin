@@ -6,6 +6,7 @@
 use alloc::format;
 #[cfg(feature = "alloc")]
 use alloc::string::{String, ToString};
+use core::num::{NonZeroI64, NonZeroU64};
 #[cfg(feature = "std")]
 use std::panic;
 
@@ -13,15 +14,21 @@ use std::panic;
 use ::serde::{Deserialize, Serialize};
 
 use super::*;
-use crate::NumOpResult;
 #[cfg(feature = "alloc")]
 use crate::{FeeRate, Weight};
+use crate::{MathOp, NumOpResult};
 
 #[track_caller]
 fn sat(sat: u64) -> Amount { Amount::from_sat(sat).unwrap() }
 
 #[track_caller]
 fn ssat(ssat: i64) -> SignedAmount { SignedAmount::from_sat(ssat).unwrap() }
+
+#[track_caller]
+fn res(n_sat: u64) -> NumOpResult<Amount> { NumOpResult::from(sat(n_sat)) }
+
+#[track_caller]
+fn sres(n_sat: i64) -> NumOpResult<SignedAmount> { NumOpResult::from(ssat(n_sat)) }
 
 #[test]
 fn sanity_check() {
@@ -112,6 +119,75 @@ fn from_int_btc() {
     assert_eq!(ssat(-200_000_000), amt);
     let amt = SignedAmount::from_int_btc(-2_i16);
     assert_eq!(ssat(-200_000_000), amt);
+}
+
+#[test]
+#[cfg(feature = "alloc")]
+fn display_display_struct() {
+    let display_fixed_btc = Display {
+        sats_abs: 100_000_000,
+        is_negative: false,
+        style: DisplayStyle::FixedDenomination {
+            denomination: Denomination::Bitcoin,
+            show_denomination: true,
+        },
+    };
+    assert_eq!(format!("{}", display_fixed_btc), "1 BTC");
+
+    let display_fixed_sat = Display {
+        sats_abs: 1,
+        is_negative: false,
+        style: DisplayStyle::FixedDenomination {
+            denomination: Denomination::Satoshi,
+            show_denomination: true,
+        },
+    };
+    assert_eq!(format!("{}", display_fixed_sat), "1 satoshi");
+
+    let display_dynamic_btc = Display {
+        sats_abs: 100_000_000,
+        is_negative: false,
+        style: DisplayStyle::DynamicDenomination,
+    };
+    assert_eq!(format!("{}", display_dynamic_btc), "1 BTC");
+
+    let display_dynamic_sat = Display {
+        sats_abs: 99_999_999,
+        is_negative: false,
+        style: DisplayStyle::DynamicDenomination,
+    };
+    assert_eq!(format!("{}", display_dynamic_sat), "99999999 satoshi");
+
+    let display_negative_btc = Display {
+        sats_abs: 100_000_000,
+        is_negative: true,
+        style: DisplayStyle::DynamicDenomination,
+    };
+    assert_eq!(format!("{}", display_negative_btc), "-1 BTC");
+
+    let display_negative_sat = Display {
+        sats_abs: 99_999_999,
+        is_negative: true,
+        style: DisplayStyle::DynamicDenomination,
+    };
+    assert_eq!(format!("{}", display_negative_sat), "-99999999 satoshi");
+}
+
+#[test]
+#[cfg(feature = "alloc")]
+fn display_math_op() {
+    let cases = [
+        (MathOp::Add, "add"),
+        (MathOp::Sub, "sub"),
+        (MathOp::Mul, "mul"),
+        (MathOp::Div, "div"),
+        (MathOp::Rem, "rem"),
+        (MathOp::Neg, "neg"),
+    ];
+
+    for (op, expected) in cases {
+        assert_eq!(format!("{}", op), expected);
+    }
 }
 
 #[test]
@@ -1191,9 +1267,6 @@ fn signed_subtraction() {
 
 #[test]
 fn op_int_combos() {
-    let res = |n_sat| NumOpResult::from(sat(n_sat));
-    let sres = |n_ssat| NumOpResult::from(ssat(n_ssat));
-
     assert_eq!(sat(23) * 31, res(713));
     assert_eq!(ssat(23) * 31, sres(713));
     assert_eq!(res(23) * 31, res(713));
@@ -1255,6 +1328,40 @@ fn signed_amount_div_by_amount() {
 fn signed_amount_div_by_amount_zero() {
     let res = ssat(1897) / SignedAmount::ZERO;
     assert!(res.into_result().is_err());
+}
+
+#[test]
+fn mul_assign() {
+    let mut result = res(113);
+    result *= 367;
+    assert_eq!(result, res(41471));
+
+    let mut max = res(Amount::MAX.to_sat());
+    max *= 2;
+    assert!(max.is_error());
+
+    let mut signed_result = sres(-211);
+    signed_result *= 431;
+    assert_eq!(signed_result, sres(-90941));
+
+    let mut min = sres(SignedAmount::MIN.to_sat());
+    min *= 2;
+    assert!(min.is_error());
+}
+
+#[test]
+fn div_assign() {
+    let mut result = res(41471);
+    result /= 367;
+    assert_eq!(result, res(113));
+    result /= 0;
+    assert!(result.is_error());
+
+    let mut signed_result = sres(-90941);
+    signed_result /= 211;
+    assert_eq!(signed_result, sres(-431));
+    signed_result /= 0;
+    assert!(signed_result.is_error());
 }
 
 #[test]
@@ -1423,4 +1530,27 @@ fn math_op_errors() {
     } else {
         panic!("Expected a division by zero error, but got a valid result");
     }
+}
+
+#[test]
+#[allow(clippy::op_ref)]
+fn amount_div_nonzero() {
+    let amount = Amount::from_sat(100).unwrap();
+    let divisor = NonZeroU64::new(4).unwrap();
+    let result = amount / divisor;
+    assert_eq!(result, Amount::from_sat(25).unwrap());
+    //checking also for &T/&U variant
+    assert_eq!(&amount / &divisor, Amount::from_sat(25).unwrap());
+}
+
+#[test]
+#[allow(clippy::op_ref)]
+fn signed_amount_div_nonzero() {
+    let signed = SignedAmount::from_sat(-100).unwrap();
+    let divisor = NonZeroI64::new(4).unwrap();
+    let result = signed / divisor;
+    assert_eq!(result, SignedAmount::from_sat(-25).unwrap());
+    //checking also for &T/U, T/&Uvariant
+    assert_eq!(&signed / divisor, SignedAmount::from_sat(-25).unwrap());
+    assert_eq!(signed / &divisor, SignedAmount::from_sat(-25).unwrap());
 }

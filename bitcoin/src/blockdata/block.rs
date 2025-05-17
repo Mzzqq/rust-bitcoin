@@ -30,7 +30,11 @@ use crate::transaction::{Transaction, TransactionExt as _, Wtxid};
 #[doc(inline)]
 pub use primitives::block::{Block, Checked, Unchecked, Validation, Version, BlockHash, Header, WitnessCommitment};
 #[doc(inline)]
-pub use units::block::{BlockHeight, BlockInterval, TooBigForRelativeBlockHeightError};
+pub use units::block::{BlockHeight, BlockHeightInterval, TooBigForRelativeHeightError};
+
+#[deprecated(since = "TBD", note = "use `BlockHeightInterval` instead")]
+#[doc(hidden)]
+pub type BlockInterval = BlockHeightInterval;
 
 impl_hashencode!(BlockHash);
 
@@ -503,7 +507,7 @@ impl std::error::Error for ValidationError {
 
 #[cfg(test)]
 mod tests {
-    use hex::test_hex_unwrap as hex;
+    use hex_lit::hex;
     use internals::ToU64 as _;
 
     use super::*;

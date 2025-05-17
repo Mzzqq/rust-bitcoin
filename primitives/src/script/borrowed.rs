@@ -19,7 +19,7 @@ internals::transparent_newtype! {
     /// form `&Script`. It is always encoded as a series of bytes representing the opcodes and data
     /// pushes.
     ///
-    /// ## Validity
+    /// # Validity
     ///
     /// `Script` does not have any validity invariants - it's essentially just a marked slice of
     /// bytes. This is similar to [`Path`](std::path::Path) vs [`OsStr`](std::ffi::OsStr) where they
@@ -30,7 +30,7 @@ internals::transparent_newtype! {
     /// allowed to be in a transaction (outputs just become unspendable) and there even are such
     /// transactions in the chain. Thus we must allow such scripts to be placed in the transaction.
     ///
-    /// ## Slicing safety
+    /// # Slicing safety
     ///
     /// Slicing is similar to how `str` works: some ranges may be incorrect and indexing by
     /// `usize` is not supported. However, as opposed to `std`, we have no way of checking
@@ -44,15 +44,20 @@ internals::transparent_newtype! {
     /// It is recommended to use `.instructions()` method to get an iterator over script
     /// instructions and work with that instead.
     ///
-    /// ## Memory safety
+    /// # Memory safety
     ///
     /// The type is `#[repr(transparent)]` for internal purposes only!
     /// No consumer crate may rely on the representation of the struct!
     ///
-    /// ## References
+    /// # Hexadecimal strings
     ///
+    /// Scripts are consensus encoded with a length prefix and as a result of this in some places in
+    /// the eccosystem one will encounter hex strings that include the prefix while in other places
+    /// the prefix is excluded. To support parsing and formatting scripts as hex we provide a bunch
+    /// of different APIs and trait implementations. Please see [`examples/script.rs`] for a
+    /// thorough example of all the APIs.
     ///
-    /// ### Bitcoin Core References
+    /// # Bitcoin Core References
     ///
     /// * [CScript definition](https://github.com/bitcoin/bitcoin/blob/d492dc1cdaabdc52b0766bf4cba4bd73178325d0/src/script/script.h#L410)
     ///
@@ -90,14 +95,20 @@ impl Script {
     pub const fn new() -> &'static Self { Self::from_bytes(&[]) }
 
     /// Returns the script data as a byte slice.
+    ///
+    /// This is just the script bytes **not** consensus encoding (which includes a length prefix).
     #[inline]
     pub const fn as_bytes(&self) -> &[u8] { &self.0 }
 
     /// Returns the script data as a mutable byte slice.
+    ///
+    /// This is just the script bytes **not** consensus encoding (which includes a length prefix).
     #[inline]
     pub fn as_mut_bytes(&mut self) -> &mut [u8] { &mut self.0 }
 
     /// Returns a copy of the script data.
+    ///
+    /// This is just the script bytes **not** consensus encoding (which includes a length prefix).
     #[inline]
     pub fn to_vec(&self) -> Vec<u8> { self.as_bytes().to_owned() }
 

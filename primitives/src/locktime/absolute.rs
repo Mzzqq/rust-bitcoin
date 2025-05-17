@@ -16,7 +16,11 @@ use crate::{absolute, Transaction};
 
 #[rustfmt::skip]                // Keep public re-exports separate.
 #[doc(inline)]
-pub use units::locktime::absolute::{ConversionError, Height, ParseHeightError, ParseTimeError, Time, LOCK_TIME_THRESHOLD};
+pub use units::locktime::absolute::{ConversionError, Height, ParseHeightError, ParseTimeError, MedianTimePast, LOCK_TIME_THRESHOLD};
+
+#[deprecated(since = "TBD", note = "use `MedianTimePast` instead")]
+#[doc(hidden)]
+pub type Time = MedianTimePast;
 
 /// An absolute lock time value, representing either a block height or a UNIX timestamp (seconds
 /// since epoch).
@@ -24,7 +28,7 @@ pub use units::locktime::absolute::{ConversionError, Height, ParseHeightError, P
 /// Used for transaction lock time (`nLockTime` in Bitcoin Core and [`Transaction::lock_time`]
 /// in this library) and also for the argument to opcode `OP_CHECKLOCKTIMEVERIFY`.
 ///
-/// ### Note on ordering
+/// # Note on ordering
 ///
 /// Locktimes may be height- or time-based, and these metrics are incommensurate; there is no total
 /// ordering on locktimes. In order to compare locktimes, instead of using `<` or `>` we provide the
@@ -34,7 +38,7 @@ pub use units::locktime::absolute::{ConversionError, Height, ParseHeightError, P
 /// it easy to store transactions in sorted data structures, and use the locktime's 32-bit integer
 /// consensus encoding to order it.
 ///
-/// ### Relevant BIPs
+/// # Relevant BIPs
 ///
 /// * [BIP-65 OP_CHECKLOCKTIMEVERIFY](https://github.com/bitcoin/bips/blob/master/bip-0065.mediawiki)
 /// * [BIP-113 Median time-past as endpoint for lock-time calculations](https://github.com/bitcoin/bips/blob/master/bip-0113.mediawiki)
@@ -79,7 +83,7 @@ pub enum LockTime {
     /// assert!(n.is_block_time());
     /// assert_eq!(n.to_consensus_u32(), seconds);
     /// ```
-    Seconds(Time),
+    Seconds(MedianTimePast),
 }
 
 impl LockTime {
@@ -141,9 +145,9 @@ impl LockTime {
     #[allow(clippy::missing_panics_doc)]
     pub fn from_consensus(n: u32) -> Self {
         if units::locktime::absolute::is_block_height(n) {
-            Self::Blocks(Height::from_consensus(n).expect("n is valid"))
+            Self::Blocks(Height::from_u32(n).expect("n is valid"))
         } else {
-            Self::Seconds(Time::from_consensus(n).expect("n is valid"))
+            Self::Seconds(MedianTimePast::from_u32(n).expect("n is valid"))
         }
     }
 
@@ -166,18 +170,24 @@ impl LockTime {
     /// ```
     #[inline]
     pub fn from_height(n: u32) -> Result<Self, ConversionError> {
-        let height = Height::from_consensus(n)?;
+        let height = Height::from_u32(n)?;
         Ok(LockTime::Blocks(height))
     }
 
-    /// Constructs a new `LockTime` from `n`, expecting `n` to be a valid block time.
+    #[inline]
+    #[deprecated(since = "TBD", note = "use `from_mtp` instead")]
+    #[doc(hidden)]
+    pub fn from_time(n: u32) -> Result<Self, ConversionError> { Self::from_mtp(n) }
+
+    /// Constructs a new `LockTime` from `n`, expecting `n` to be a median-time-past (MTP)
+    /// which is in range for a locktime.
     ///
     /// # Note
     ///
-    /// If the locktime is set to a timestamp `T`,
-    /// the transaction can be included in a block only if the median time past (MTP) of the
-    /// last 11 blocks is greater than `T`.
-    /// It is possible to broadcast the transaction once the MTP is greater than `T`.[see BIP-113]
+    /// If the locktime is set to an MTP `T`, the transaction can be included in a block only if
+    /// the MTP of last recent 11 blocks is greater than `T`.
+    ///
+    /// It is possible to broadcast the transaction once the MTP is greater than `T`. See BIP-113.
     ///
     /// [BIP-113 Median time-past as endpoint for lock-time calculations](https://github.com/bitcoin/bips/blob/master/bip-0113.mediawiki)
     ///
@@ -191,8 +201,8 @@ impl LockTime {
     /// assert!(absolute::LockTime::from_time(741521).is_err());
     /// ```
     #[inline]
-    pub fn from_time(n: u32) -> Result<Self, ConversionError> {
-        let time = Time::from_consensus(n)?;
+    pub fn from_mtp(n: u32) -> Result<Self, ConversionError> {
+        let time = MedianTimePast::from_u32(n)?;
         Ok(LockTime::Seconds(time))
     }
 
@@ -229,7 +239,7 @@ impl LockTime {
     /// # use bitcoin_primitives::absolute;
     /// // Can be implemented if block chain data is available.
     /// fn get_height() -> absolute::Height { todo!("return the current block height") }
-    /// fn get_time() -> absolute::Time { todo!("return the current block time") }
+    /// fn get_time() -> absolute::MedianTimePast { todo!("return the current block time") }
     ///
     /// let n = absolute::LockTime::from_consensus(741521); // `n OP_CHEKCLOCKTIMEVERIFY`.
     /// if n.is_satisfied_by(get_height(), get_time()) {
@@ -237,7 +247,7 @@ impl LockTime {
     /// }
     /// ````
     #[inline]
-    pub fn is_satisfied_by(self, height: Height, time: Time) -> bool {
+    pub fn is_satisfied_by(self, height: Height, time: MedianTimePast) -> bool {
         use LockTime as L;
 
         match self {
@@ -253,9 +263,15 @@ impl LockTime {
     /// two lock times (same unit) then the larger lock time being satisfied implies (in a
     /// mathematical sense) the smaller one being satisfied.
     ///
-    /// This function is useful if you wish to check a lock time against various other locks e.g.,
-    /// filtering out locks which cannot be satisfied. Can also be used to remove the smaller value
-    /// of two `OP_CHECKLOCKTIMEVERIFY` operations within one branch of the script.
+    /// This function serves multiple purposes:
+    ///
+    /// * When evaluating `OP_CHECKLOCKTIMEVERIFY` the argument must be less than or equal to the
+    ///   transactions nLockTime. If using this function to validate a script `self` is the argument
+    ///   to `CLTV` and `other` is the transaction nLockTime.
+    ///
+    /// * If you wish to check a lock time against various other locks e.g., filtering out locks
+    ///   which cannot be satisfied. Can also be used to remove the smaller value of two
+    ///   `OP_CHECKLOCKTIMEVERIFY` operations within one branch of the script.
     ///
     /// # Examples
     ///
@@ -304,8 +320,8 @@ impl LockTime {
     #[inline]
     pub fn to_consensus_u32(self) -> u32 {
         match self {
-            LockTime::Blocks(ref h) => h.to_consensus_u32(),
-            LockTime::Seconds(ref t) => t.to_consensus_u32(),
+            LockTime::Blocks(ref h) => h.to_u32(),
+            LockTime::Seconds(ref t) => t.to_u32(),
         }
     }
 }
@@ -317,9 +333,9 @@ impl From<Height> for LockTime {
     fn from(h: Height) -> Self { LockTime::Blocks(h) }
 }
 
-impl From<Time> for LockTime {
+impl From<MedianTimePast> for LockTime {
     #[inline]
-    fn from(t: Time) -> Self { LockTime::Seconds(t) }
+    fn from(t: MedianTimePast) -> Self { LockTime::Seconds(t) }
 }
 
 impl fmt::Debug for LockTime {
@@ -406,7 +422,7 @@ mod tests {
     #[test]
     fn display_and_alternate() {
         let lock_by_height = LockTime::from_height(741_521).unwrap();
-        let lock_by_time = LockTime::from_time(1_653_195_600).unwrap(); // May 22nd 2022, 5am UTC.
+        let lock_by_time = LockTime::from_mtp(1_653_195_600).unwrap(); // May 22nd 2022, 5am UTC.
 
         assert_eq!(format!("{}", lock_by_height), "741521");
         assert_eq!(format!("{:#}", lock_by_height), "block-height 741521");
@@ -462,9 +478,9 @@ mod tests {
         assert!(LockTime::from_height(500_000_000).is_err()); // The threshold.
         assert!(LockTime::from_height(500_000_001).is_err()); // Above the threshold.
 
-        assert!(LockTime::from_time(499_999_999).is_err()); // Below the threshold.
-        assert!(LockTime::from_time(500_000_000).is_ok()); // The threshold.
-        assert!(LockTime::from_time(500_000_001).is_ok()); // Above the threshold.
+        assert!(LockTime::from_mtp(499_999_999).is_err()); // Below the threshold.
+        assert!(LockTime::from_mtp(500_000_000).is_ok()); // The threshold.
+        assert!(LockTime::from_mtp(500_000_001).is_ok()); // Above the threshold.
     }
 
     #[test]
@@ -489,14 +505,14 @@ mod tests {
 
     #[test]
     fn satisfied_by_height() {
-        let height_below = Height::from_consensus(700_000).unwrap();
-        let height = Height::from_consensus(750_000).unwrap();
-        let height_above = Height::from_consensus(800_000).unwrap();
+        let height_below = Height::from_u32(700_000).unwrap();
+        let height = Height::from_u32(750_000).unwrap();
+        let height_above = Height::from_u32(800_000).unwrap();
 
         let lock_by_height = LockTime::from(height);
 
         let t: u32 = 1_653_195_600; // May 22nd, 5am UTC.
-        let time = Time::from_consensus(t).unwrap();
+        let time = MedianTimePast::from_u32(t).unwrap();
 
         assert!(!lock_by_height.is_satisfied_by(height_below, time));
         assert!(lock_by_height.is_satisfied_by(height, time));
@@ -505,13 +521,13 @@ mod tests {
 
     #[test]
     fn satisfied_by_time() {
-        let time_before = Time::from_consensus(1_653_109_200).unwrap(); // "May 21th 2022, 5am UTC.
-        let time = Time::from_consensus(1_653_195_600).unwrap(); // "May 22nd 2022, 5am UTC.
-        let time_after = Time::from_consensus(1_653_282_000).unwrap(); // "May 23rd 2022, 5am UTC.
+        let time_before = MedianTimePast::from_u32(1_653_109_200).unwrap(); // "May 21th 2022, 5am UTC.
+        let time = MedianTimePast::from_u32(1_653_195_600).unwrap(); // "May 22nd 2022, 5am UTC.
+        let time_after = MedianTimePast::from_u32(1_653_282_000).unwrap(); // "May 23rd 2022, 5am UTC.
 
         let lock_by_time = LockTime::from(time);
 
-        let height = Height::from_consensus(800_000).unwrap();
+        let height = Height::from_u32(800_000).unwrap();
 
         assert!(!lock_by_time.is_satisfied_by(height, time_before));
         assert!(lock_by_time.is_satisfied_by(height, time));
